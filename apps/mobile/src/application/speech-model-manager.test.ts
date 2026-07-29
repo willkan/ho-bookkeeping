@@ -20,7 +20,7 @@ class FakeSpeechModelArtifacts implements SpeechModelArtifactsPort {
     return this.ready;
   }
   async getReadyPath() {
-    return this.ready ? '/models/sense-voice' : null;
+    return this.ready ? '/models/streaming-zipformer' : null;
   }
   async getFreeBytes() {
     return this.freeBytes;
@@ -42,7 +42,7 @@ class FakeSpeechModelArtifacts implements SpeechModelArtifactsPort {
   async publish() {
     this.published = true;
     this.ready = true;
-    return '/models/sense-voice';
+    return '/models/streaming-zipformer';
   }
   async discardStaging() {
     this.discarded = true;
@@ -62,8 +62,13 @@ describe('speech model download lifecycle', () => {
 
     const path = await manager.download('domestic', (next) => progress.push(next));
 
-    expect(path).toBe('/models/sense-voice');
-    expect(artifacts.downloaded).toEqual(['domestic:model.int8.onnx', 'domestic:tokens.txt']);
+    expect(path).toBe('/models/streaming-zipformer');
+    expect(artifacts.downloaded).toEqual([
+      'domestic:encoder.int8.onnx',
+      'domestic:decoder.onnx',
+      'domestic:joiner.int8.onnx',
+      'domestic:tokens.txt',
+    ]);
     expect(artifacts.published).toBe(true);
     expect(progress.at(-1)).toEqual({
       bytesDownloaded: totalSpeechModelBytes(),

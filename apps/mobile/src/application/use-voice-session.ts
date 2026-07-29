@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
-import type { SpeechTranscriberPort } from './ports/speech-transcriber';
-import type { VoiceRecorderPort } from './ports/voice-recorder';
+import type { StreamingSpeechPort } from './ports/streaming-speech';
 import {
   displayText,
   isFieldEditingDisabled,
@@ -15,8 +14,8 @@ import {
  * React binding for VoiceSessionController.
  * Cleans up on unmount and AppState background.
  */
-export function useVoiceSession(recorder: VoiceRecorderPort, transcriber: SpeechTranscriberPort) {
-  const [controller] = useState(() => new VoiceSessionController(recorder, transcriber));
+export function useVoiceSession(speech: StreamingSpeechPort) {
+  const [controller] = useState(() => new VoiceSessionController(speech));
 
   const state = useSyncExternalStore(
     (onStoreChange) => controller.subscribe(onStoreChange),
@@ -25,7 +24,6 @@ export function useVoiceSession(recorder: VoiceRecorderPort, transcriber: Speech
   );
 
   useEffect(() => {
-    void controller.cleanupOrphanedRecordings();
     const onAppState = (next: AppStateStatus) => {
       if (next !== 'active') {
         void controller.handleAppBackground();
@@ -69,13 +67,13 @@ export function useVoiceSession(recorder: VoiceRecorderPort, transcriber: Speech
     toggleMicForAccessibility,
     micHoldAccessibilityLabel: VOICE_COPY.micHold,
     micToggleAccessibilityLabel: micToggleLabel(state),
-    isRecording: state.phase === 'recording',
-    isBusy: state.phase === 'requesting_permission' || state.phase === 'transcribing',
+    isRecording: state.phase === 'streaming',
+    isBusy: state.phase === 'requesting_permission' || state.phase === 'finalizing',
   };
 }
 
 function micToggleLabel(state: VoiceSessionState): string {
-  if (state.phase === 'recording') return VOICE_COPY.micToggleRecording;
-  if (state.phase === 'transcribing') return VOICE_COPY.micTranscribing;
+  if (state.phase === 'streaming') return VOICE_COPY.micToggleStreaming;
+  if (state.phase === 'finalizing') return VOICE_COPY.micFinalizing;
   return VOICE_COPY.micToggleIdle;
 }

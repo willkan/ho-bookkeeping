@@ -3,7 +3,7 @@ import type {
   SpeechModelDownloadProgress,
 } from './ports/speech-model-artifacts';
 import {
-  SENSE_VOICE_MODEL,
+  STREAMING_SPEECH_MODEL,
   totalSpeechModelBytes,
   type SpeechModelDownloadSource,
 } from './speech-model';
@@ -48,14 +48,14 @@ export class SpeechModelManager {
     if (freeBytes < totalBytes + REQUIRED_FREE_SPACE_BUFFER_BYTES) {
       throw new SpeechModelManagerError(
         'insufficient_storage',
-        '设备可用空间不足，请至少预留 360 MB 后重试',
+        '设备可用空间不足，请至少预留 300 MB 后重试',
       );
     }
 
     let completedBytes = 0;
     await this.artifacts.prepareStaging();
     try {
-      for (const file of SENSE_VOICE_MODEL.files) {
+      for (const file of STREAMING_SPEECH_MODEL.files) {
         await this.artifacts.downloadFile({
           source,
           file,

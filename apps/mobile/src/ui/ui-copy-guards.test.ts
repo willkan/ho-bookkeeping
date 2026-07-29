@@ -126,15 +126,15 @@ describe('UI product-copy guards', () => {
     expect(src.includes('仅展示格式')).toBe(false);
   });
 
-  // Positive: voice disclosure explains temporary capture and device-only transcription
-  it('voice session ships Chinese record-then-transcribe disclosure', () => {
+  // Positive: voice disclosure explains file-free, device-only streaming recognition
+  it('voice session ships Chinese streaming disclosure', () => {
     const src = readFileSync(join(APP_ROOT, 'src/application/voice-session.ts'), 'utf8');
     expect(src).toMatch(/识别完全在本机进行/);
-    expect(src).toMatch(/录音仅临时保存在本机，转写后删除/);
-    expect(src).toMatch(/正在录音，松开结束/);
+    expect(src).toMatch(/不会生成录音文件/);
+    expect(src).toMatch(/正在听，松开结束/);
     expect(src).toMatch(/按住说话/);
     expect(src).toMatch(/权限已开启，请再按住说话/);
-    expect(src).toMatch(/正在转成文字/);
+    expect(src).toMatch(/正在完成识别/);
     expect(src).toMatch(/没有识别到语音/);
     expect(src).toMatch(/未获得麦克风权限/);
   });

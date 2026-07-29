@@ -1,27 +1,27 @@
 import {
-  SpeechTranscriptionError,
-  type SpeechTranscriptionErrorCode,
-  type SpeechTranscriberPort,
-} from './ports/speech-transcriber';
-import type { VoiceRecorderPort } from './ports/voice-recorder';
+  StreamingSpeechError,
+  type StreamingSpeechErrorCode,
+  type StreamingSpeechPort,
+} from './ports/streaming-speech';
 
 export const VOICE_COPY = {
-  recording: '正在录音，松开结束',
-  transcribing: '正在转成文字…',
+  streaming: '正在听，松开结束',
+  finalizing: '正在完成识别…',
   permissionDenied: '未获得麦克风权限，可在系统设置中开启后重试',
   noSpeech: '没有识别到语音，可重试',
   modelNotReady: '请先下载离线语音模型',
   modelFailed: '本地语音模型加载失败，可重新下载后重试',
-  busy: '语音转写正忙，请稍后再试',
-  interrupted: '语音转写被打断，可重试',
-  recordingFailed: '录音失败，可重试',
-  unknown: '语音转写出错，可重试',
+  captureFailed: '麦克风收音失败，可重试',
+  recognitionFailed: '本地语音识别失败，可重试',
+  busy: '语音识别正忙，请稍后再试',
+  interrupted: '语音识别被打断，可重试',
+  unknown: '语音识别出错，可重试',
   holdAgain: '权限已开启，请再按住说话',
-  disclosure: '录音仅临时保存在本机，转写后删除；识别完全在本机进行',
+  disclosure: '不会生成录音文件；识别完全在本机进行',
   micHold: '按住说话',
-  micToggleIdle: '开始录音',
-  micToggleRecording: '结束录音',
-  micTranscribing: '正在转写',
+  micToggleIdle: '开始语音输入',
+  micToggleStreaming: '结束语音输入',
+  micFinalizing: '正在完成识别',
 } as const;
 
 export type VoiceErrorReason =
@@ -31,20 +31,22 @@ export type VoiceErrorReason =
   | 'model_failed'
   | 'busy'
   | 'interrupted'
-  | 'recording_failed'
+  | 'capture_failed'
+  | 'recognition_failed'
   | 'unknown';
 
-export type VoiceSessionPhase = 'idle' | 'requesting_permission' | 'recording' | 'transcribing';
+export type VoiceSessionPhase = 'idle' | 'requesting_permission' | 'streaming' | 'finalizing';
 
 export type VoiceSessionState = {
   phase: VoiceSessionPhase;
   typedText: string;
+  partialText: string;
   error: { reason: VoiceErrorReason; message: string } | null;
   notice: string | null;
 };
 
 export function createInitialVoiceSessionState(typedText = ''): VoiceSessionState {
-  return { phase: 'idle', typedText, error: null, notice: null };
+  return { phase: 'idle', typedText, partialText: '', error: null, notice: null };
 }
 
 export function joinTranscript(prefix: string, segment: string): string {
@@ -59,7 +61,7 @@ export function joinTranscript(prefix: string, segment: string): string {
 }
 
 export function displayText(state: VoiceSessionState): string {
-  return state.typedText;
+  return joinTranscript(state.typedText, state.partialText);
 }
 
 export function isFieldEditingDisabled(state: VoiceSessionState): boolean {
@@ -69,12 +71,12 @@ export function isFieldEditingDisabled(state: VoiceSessionState): boolean {
 export function statusMessage(state: VoiceSessionState): string | null {
   if (state.error) return state.error.message;
   if (state.notice) return state.notice;
-  if (state.phase === 'recording') return VOICE_COPY.recording;
-  if (state.phase === 'transcribing') return VOICE_COPY.transcribing;
+  if (state.phase === 'streaming') return state.partialText || VOICE_COPY.streaming;
+  if (state.phase === 'finalizing') return VOICE_COPY.finalizing;
   return VOICE_COPY.micHold;
 }
 
-export function mapSpeechError(code: SpeechTranscriptionErrorCode): {
+export function mapSpeechError(code: StreamingSpeechErrorCode): {
   reason: VoiceErrorReason;
   message: string;
 } {
@@ -85,6 +87,10 @@ export function mapSpeechError(code: SpeechTranscriptionErrorCode): {
       return { reason: 'model_not_ready', message: VOICE_COPY.modelNotReady };
     case 'model-load-failed':
       return { reason: 'model_failed', message: VOICE_COPY.modelFailed };
+    case 'capture-failed':
+      return { reason: 'capture_failed', message: VOICE_COPY.captureFailed };
+    case 'recognition-failed':
+      return { reason: 'recognition_failed', message: VOICE_COPY.recognitionFailed };
     case 'busy':
       return { reason: 'busy', message: VOICE_COPY.busy };
     case 'interrupted':
@@ -94,19 +100,15 @@ export function mapSpeechError(code: SpeechTranscriptionErrorCode): {
   }
 }
 
-/** Owns the visible record → stop → transcribe state machine; never submits a ledger input. */
+/** Owns the visible press → streaming preview → release/finalize state machine. */
 export class VoiceSessionController {
   private state = createInitialVoiceSessionState();
   private readonly listeners = new Set<() => void>();
   private generation = 0;
-  private activeTemporaryUri: string | null = null;
   private disposed = false;
   private holdActive = false;
 
-  constructor(
-    private readonly recorder: VoiceRecorderPort,
-    private readonly transcriber: SpeechTranscriberPort,
-  ) {}
+  constructor(private readonly speech: StreamingSpeechPort) {}
 
   getState(): VoiceSessionState {
     return this.state;
@@ -124,79 +126,63 @@ export class VoiceSessionController {
 
   async toggleMicForAccessibility(): Promise<void> {
     if (this.disposed) return;
-    if (this.state.phase === 'recording') {
-      await this.stopAndTranscribe();
+    if (this.state.phase === 'streaming') {
+      await this.stopAndFinalize();
       return;
     }
-    if (this.state.phase === 'idle') {
-      await this.beginRecording();
-    }
+    if (this.state.phase === 'idle') await this.beginStreaming();
   }
 
   async pressMic(): Promise<void> {
     if (this.disposed || this.state.phase !== 'idle') return;
     this.holdActive = true;
-    await this.beginRecording(true);
+    await this.beginStreaming(true);
   }
 
   async releaseMic(): Promise<void> {
     this.holdActive = false;
-    if (this.disposed || this.state.phase !== 'recording') return;
-    await this.stopAndTranscribe();
-  }
-
-  async cleanupOrphanedRecordings(): Promise<void> {
-    await this.ignoreCleanupError(() => this.recorder.cleanupOrphanedFiles());
+    if (this.disposed || this.state.phase !== 'streaming') return;
+    await this.stopAndFinalize();
   }
 
   async handleAppBackground(): Promise<void> {
-    // Native permission sheets may briefly background the host. No audio exists yet,
-    // so let the permission promise settle instead of invalidating the user's first tap.
     if (this.state.phase === 'requesting_permission') return;
     await this.cleanup();
   }
 
   async cleanup(): Promise<void> {
     if (this.disposed) return;
-    const phase = this.state.phase;
-    const uri = this.activeTemporaryUri;
-    this.activeTemporaryUri = null;
+    const active = this.state.phase === 'streaming' || this.state.phase === 'finalizing';
     this.holdActive = false;
     this.generation += 1;
-    this.patch({ phase: 'idle', error: null, notice: null });
-
-    if (phase === 'recording') {
-      await this.ignoreCleanupError(() => this.recorder.cancel());
-    }
-    if (phase === 'transcribing') {
-      this.transcriber.cancel();
-    }
-    if (uri) {
-      await this.ignoreCleanupError(() => this.recorder.deleteTemporaryFile(uri));
-    }
+    this.patch({ phase: 'idle', partialText: '', error: null, notice: null });
+    if (active) await this.ignoreCleanupError(() => this.speech.cancel());
   }
 
   async dispose(): Promise<void> {
     if (this.disposed) return;
     await this.cleanup();
+    await this.ignoreCleanupError(() => this.speech.dispose());
     this.listeners.clear();
     this.disposed = true;
   }
 
-  private async beginRecording(requireActiveHold = false): Promise<void> {
+  private async beginStreaming(requireActiveHold = false): Promise<void> {
     const generation = ++this.generation;
-    this.patch({ phase: 'requesting_permission', error: null, notice: null });
+    this.patch({
+      phase: 'requesting_permission',
+      partialText: '',
+      error: null,
+      notice: null,
+    });
 
-    if (!this.transcriber.isAvailable()) {
+    if (!this.speech.isAvailable()) {
       this.failIfCurrent(generation, 'model_failed', VOICE_COPY.modelFailed);
       return;
     }
 
     try {
-      const microphoneGranted = await this.ensurePermission(
-        () => this.recorder.getPermissions(),
-        () => this.recorder.requestPermissions(),
-      );
+      const microphoneGranted = await this.ensurePermission();
       if (!this.isCurrent(generation)) return;
       if (!microphoneGranted) {
         this.failIfCurrent(generation, 'permission_denied', VOICE_COPY.permissionDenied);
@@ -207,46 +193,41 @@ export class VoiceSessionController {
         return;
       }
 
-      await this.recorder.start();
+      await this.speech.start({
+        onPartial: (text) => {
+          if (this.isCurrent(generation) && this.state.phase === 'streaming') {
+            this.patch({ partialText: text.trim() });
+          }
+        },
+        onError: (error) => {
+          if (this.isCurrent(generation)) void this.failActiveStream(generation, error);
+        },
+      });
       if (!this.isCurrent(generation)) {
-        await this.ignoreCleanupError(() => this.recorder.cancel());
+        await this.ignoreCleanupError(() => this.speech.cancel());
         return;
       }
       if (requireActiveHold && !this.holdActive) {
-        await this.ignoreCleanupError(() => this.recorder.cancel());
+        await this.ignoreCleanupError(() => this.speech.cancel());
         this.patch({ phase: 'idle', notice: VOICE_COPY.holdAgain });
         return;
       }
-      this.patch({ phase: 'recording' });
-    } catch {
-      this.failIfCurrent(generation, 'recording_failed', VOICE_COPY.recordingFailed);
+      this.patch({ phase: 'streaming' });
+    } catch (error) {
+      this.failWithError(generation, error, 'capture_failed', VOICE_COPY.captureFailed);
     }
   }
 
-  private async stopAndTranscribe(): Promise<void> {
+  private async stopAndFinalize(): Promise<void> {
     const generation = this.generation;
-    this.patch({ phase: 'transcribing', error: null, notice: null });
-    let uri: string | null = null;
-    let uriRegisteredForCleanup = false;
-
+    this.patch({ phase: 'finalizing', error: null, notice: null });
     try {
-      const recording = await this.recorder.stop();
-      uri = recording.uri;
-      if (!this.isCurrent(generation)) return;
-      this.activeTemporaryUri = uri;
-      uriRegisteredForCleanup = true;
-      const transcript = (
-        await this.transcriber.transcribe({
-          uri,
-          lang: 'zh-CN',
-          sampleRate: recording.sampleRate,
-          audioChannels: recording.audioChannels,
-        })
-      ).trim();
+      const transcript = (await this.speech.stop()).trim();
       if (!this.isCurrent(generation)) return;
       if (!transcript) {
         this.patch({
           phase: 'idle',
+          partialText: '',
           error: { reason: 'no_speech', message: VOICE_COPY.noSpeech },
         });
         return;
@@ -254,53 +235,56 @@ export class VoiceSessionController {
       this.patch({
         phase: 'idle',
         typedText: joinTranscript(this.state.typedText, transcript),
+        partialText: '',
         error: null,
         notice: null,
       });
     } catch (error) {
       if (!this.isCurrent(generation)) return;
-      if (error instanceof SpeechTranscriptionError) {
-        if (error.code === 'aborted') {
-          this.patch({ phase: 'idle', error: null });
-        } else {
-          const mapped = mapSpeechError(error.code);
-          this.patch({ phase: 'idle', error: mapped });
-        }
-      } else {
-        this.patch({
-          phase: 'idle',
-          error: {
-            reason: uri ? 'unknown' : 'recording_failed',
-            message: uri ? VOICE_COPY.unknown : VOICE_COPY.recordingFailed,
-          },
-        });
+      if (error instanceof StreamingSpeechError && error.code === 'aborted') {
+        this.patch({ phase: 'idle', partialText: '', error: null });
+        return;
       }
-    } finally {
-      const stillOwnsFile =
-        Boolean(uri) && (!uriRegisteredForCleanup || this.activeTemporaryUri === uri);
-      if (stillOwnsFile && uri) {
-        await this.ignoreCleanupError(() => this.recorder.deleteTemporaryFile(uri!));
-      }
-      if (this.activeTemporaryUri === uri) this.activeTemporaryUri = null;
+      this.failWithError(generation, error, 'recognition_failed', VOICE_COPY.recognitionFailed);
     }
   }
 
-  private async ensurePermission(
-    get: () => Promise<{ granted: boolean }>,
-    request: () => Promise<{ granted: boolean }>,
-  ): Promise<boolean> {
-    const current = await get();
+  private async failActiveStream(generation: number, error: StreamingSpeechError): Promise<void> {
+    if (!this.isCurrent(generation)) return;
+    const mapped = mapSpeechError(error.code);
+    this.generation += 1;
+    this.holdActive = false;
+    this.patch({ phase: 'idle', partialText: '', error: mapped });
+    await this.ignoreCleanupError(() => this.speech.cancel());
+  }
+
+  private async ensurePermission(): Promise<boolean> {
+    const current = await this.speech.getPermissions();
     if (current.granted) return true;
-    return (await request()).granted;
+    return (await this.speech.requestPermissions()).granted;
   }
 
   private isCurrent(generation: number): boolean {
     return !this.disposed && generation === this.generation;
   }
 
+  private failWithError(
+    generation: number,
+    error: unknown,
+    fallbackReason: VoiceErrorReason,
+    fallbackMessage: string,
+  ): void {
+    if (!this.isCurrent(generation)) return;
+    const mapped =
+      error instanceof StreamingSpeechError
+        ? mapSpeechError(error.code)
+        : { reason: fallbackReason, message: fallbackMessage };
+    this.patch({ phase: 'idle', partialText: '', error: mapped });
+  }
+
   private failIfCurrent(generation: number, reason: VoiceErrorReason, message: string): void {
     if (this.isCurrent(generation)) {
-      this.patch({ phase: 'idle', error: { reason, message } });
+      this.patch({ phase: 'idle', partialText: '', error: { reason, message } });
     }
   }
 
@@ -308,7 +292,7 @@ export class VoiceSessionController {
     try {
       await action();
     } catch {
-      // Cleanup is best effort; the file is in the OS-managed cache.
+      // Cancellation is best effort; no audio file exists to leak.
     }
   }
 

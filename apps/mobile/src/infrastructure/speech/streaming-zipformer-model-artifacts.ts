@@ -14,7 +14,7 @@ import {
 } from '@dr.pogodin/react-native-fs';
 import type { SpeechModelArtifactsPort } from '../../application/ports/speech-model-artifacts';
 import {
-  SENSE_VOICE_MODEL,
+  STREAMING_SPEECH_MODEL,
   getSpeechModelDownloadUrl,
   type SpeechModelFile,
 } from '../../application/speech-model';
@@ -22,8 +22,9 @@ import { createMobileLogger } from '../logging/mobile-logger';
 
 const logger = createMobileLogger('speech-model');
 const MODELS_ROOT = `${DocumentDirectoryPath}/speech-models`;
-const READY_DIR = `${MODELS_ROOT}/${SENSE_VOICE_MODEL.id}`;
-const STAGING_DIR = `${MODELS_ROOT}/.${SENSE_VOICE_MODEL.id}.partial`;
+const READY_DIR = `${MODELS_ROOT}/${STREAMING_SPEECH_MODEL.id}`;
+const STAGING_DIR = `${MODELS_ROOT}/.${STREAMING_SPEECH_MODEL.id}.partial`;
+const LEGACY_MODEL_ID = 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09';
 const READY_MARKER = '.ready.json';
 
 type ReadyManifest = {
@@ -33,28 +34,28 @@ type ReadyManifest = {
 };
 
 const EXPECTED_READY_MANIFEST: ReadyManifest = {
-  id: SENSE_VOICE_MODEL.id,
-  revision: SENSE_VOICE_MODEL.revision,
-  files: SENSE_VOICE_MODEL.files,
+  id: STREAMING_SPEECH_MODEL.id,
+  revision: STREAMING_SPEECH_MODEL.revision,
+  files: STREAMING_SPEECH_MODEL.files,
 };
 
 async function removeIfPresent(path: string): Promise<void> {
   if (await exists(path)) await unlink(path);
 }
 
-export class SenseVoiceModelArtifacts implements SpeechModelArtifactsPort {
+export class StreamingZipformerModelArtifacts implements SpeechModelArtifactsPort {
   private activeDownloadJobId: number | null = null;
+  private legacyCleaned = false;
 
   async isReady(): Promise<boolean> {
+    await this.cleanupLegacyArtifacts();
     const markerPath = `${READY_DIR}/${READY_MARKER}`;
     if (!(await exists(markerPath))) return false;
 
     try {
       const manifest = JSON.parse(await readFile(markerPath, 'utf8')) as ReadyManifest;
-      if (JSON.stringify(manifest) !== JSON.stringify(EXPECTED_READY_MANIFEST)) {
-        return false;
-      }
-      for (const file of SENSE_VOICE_MODEL.files) {
+      if (JSON.stringify(manifest) !== JSON.stringify(EXPECTED_READY_MANIFEST)) return false;
+      for (const file of STREAMING_SPEECH_MODEL.files) {
         const path = `${READY_DIR}/${file.name}`;
         if (!(await exists(path)) || (await stat(path)).size !== file.bytes) return false;
       }
@@ -74,6 +75,7 @@ export class SenseVoiceModelArtifacts implements SpeechModelArtifactsPort {
   }
 
   async prepareStaging(): Promise<void> {
+    await this.cleanupLegacyArtifacts();
     await mkdir(MODELS_ROOT, { NSURLIsExcludedFromBackupKey: true });
     await removeIfPresent(STAGING_DIR);
     await mkdir(STAGING_DIR, { NSURLIsExcludedFromBackupKey: true });
@@ -87,7 +89,7 @@ export class SenseVoiceModelArtifacts implements SpeechModelArtifactsPort {
     const destination = `${STAGING_DIR}/${file.name}`;
     const url = getSpeechModelDownloadUrl(source, file.name);
     logger.info('model_file_download_started', {
-      model_id: SENSE_VOICE_MODEL.id,
+      model_id: STREAMING_SPEECH_MODEL.id,
       source,
       provider_host: new URL(url).host,
       file: file.name,
@@ -109,7 +111,7 @@ export class SenseVoiceModelArtifacts implements SpeechModelArtifactsPort {
         throw new Error(`下载服务返回 ${result.statusCode}`);
       }
       logger.info('model_file_download_completed', {
-        model_id: SENSE_VOICE_MODEL.id,
+        model_id: STREAMING_SPEECH_MODEL.id,
         source,
         file: file.name,
         bytes: result.bytesWritten,
@@ -125,7 +127,7 @@ export class SenseVoiceModelArtifacts implements SpeechModelArtifactsPort {
     const actualSize = (await stat(path)).size;
     if (actualSize !== file.bytes) {
       logger.warn('model_file_size_mismatch', {
-        model_id: SENSE_VOICE_MODEL.id,
+        model_id: STREAMING_SPEECH_MODEL.id,
         file: file.name,
         expected_bytes: file.bytes,
         actual_bytes: actualSize,
@@ -135,7 +137,7 @@ export class SenseVoiceModelArtifacts implements SpeechModelArtifactsPort {
     const actualSha256 = (await hash(path, 'sha256')).toLowerCase();
     const valid = actualSha256 === file.sha256;
     logger.info('model_file_integrity_checked', {
-      model_id: SENSE_VOICE_MODEL.id,
+      model_id: STREAMING_SPEECH_MODEL.id,
       file: file.name,
       valid,
     });
@@ -150,7 +152,7 @@ export class SenseVoiceModelArtifacts implements SpeechModelArtifactsPort {
     );
     await removeIfPresent(READY_DIR);
     await moveFile(STAGING_DIR, READY_DIR);
-    logger.info('model_published', { model_id: SENSE_VOICE_MODEL.id });
+    logger.info('model_published', { model_id: STREAMING_SPEECH_MODEL.id });
     return READY_DIR;
   }
 
@@ -160,7 +162,7 @@ export class SenseVoiceModelArtifacts implements SpeechModelArtifactsPort {
 
   async deleteReadyModel(): Promise<void> {
     await removeIfPresent(READY_DIR);
-    logger.info('model_deleted', { model_id: SENSE_VOICE_MODEL.id });
+    logger.info('model_deleted', { model_id: STREAMING_SPEECH_MODEL.id });
   }
 
   cancel(): void {
@@ -168,5 +170,12 @@ export class SenseVoiceModelArtifacts implements SpeechModelArtifactsPort {
       stopDownload(this.activeDownloadJobId);
       this.activeDownloadJobId = null;
     }
+  }
+
+  private async cleanupLegacyArtifacts(): Promise<void> {
+    if (this.legacyCleaned) return;
+    await removeIfPresent(`${MODELS_ROOT}/${LEGACY_MODEL_ID}`);
+    await removeIfPresent(`${MODELS_ROOT}/.${LEGACY_MODEL_ID}.partial`);
+    this.legacyCleaned = true;
   }
 }

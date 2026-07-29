@@ -36,7 +36,7 @@ export function SpeechModelDownloadModal({
             <View style={styles.titleCopy}>
               <Text style={typography.headline}>启用离线语音</Text>
               <Text style={typography.secondary}>
-                首次下载约 228 MB，之后无需联网，录音不会离开手机。
+                首次下载约 168 MB，之后无需联网，语音会实时在本机转成文字。
               </Text>
             </View>
           </View>

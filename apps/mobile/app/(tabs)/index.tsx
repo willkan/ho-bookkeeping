@@ -16,9 +16,8 @@ import { SpeechModelManager } from '../../src/application/speech-model-manager';
 import { useSpeechModel } from '../../src/application/use-speech-model';
 import { useVoiceSession } from '../../src/application/use-voice-session';
 import type { ModeTagSnapshot } from '../../src/domain/types';
-import { useExpoVoiceRecorder } from '../../src/infrastructure/speech/expo-voice-recorder';
-import { SenseVoiceModelArtifacts } from '../../src/infrastructure/speech/sense-voice-model-artifacts';
-import { SherpaSenseVoiceTranscriber } from '../../src/infrastructure/speech/sherpa-sense-voice-transcriber';
+import { SherpaStreamingSpeech } from '../../src/infrastructure/speech/sherpa-streaming-speech';
+import { StreamingZipformerModelArtifacts } from '../../src/infrastructure/speech/streaming-zipformer-model-artifacts';
 import {
   Chip,
   EmptyState,
@@ -49,27 +48,19 @@ export default function RecordScreen() {
   const [disabledTagIds, setDisabledTagIds] = useState<Set<string>>(new Set());
   const [screenReaderEnabled, setScreenReaderEnabled] = useState(false);
   const [showSpeechModel, setShowSpeechModel] = useState(false);
-  const recorder = useExpoVoiceRecorder();
   const [speechModelManager] = useState(
-    () => new SpeechModelManager(new SenseVoiceModelArtifacts()),
+    () => new SpeechModelManager(new StreamingZipformerModelArtifacts()),
   );
   const speechModel = useSpeechModel(speechModelManager);
   const refreshSpeechModel = speechModel.refresh;
-  const [transcriber] = useState(() => new SherpaSenseVoiceTranscriber(speechModelManager));
-  const voice = useVoiceSession(recorder, transcriber);
+  const [streamingSpeech] = useState(() => new SherpaStreamingSpeech(speechModelManager));
+  const voice = useVoiceSession(streamingSpeech);
   const wasCapturingVoice = useRef(false);
 
   useFocusEffect(
     useCallback(() => {
       void refreshSpeechModel();
     }, [refreshSpeechModel]),
-  );
-
-  useEffect(
-    () => () => {
-      void transcriber.dispose();
-    },
-    [transcriber],
   );
 
   useEffect(() => {
@@ -88,7 +79,7 @@ export default function RecordScreen() {
   }, []);
 
   useEffect(() => {
-    const capturing = voice.state.phase === 'recording';
+    const capturing = voice.state.phase === 'streaming';
     if (capturing && !wasCapturingVoice.current) {
       Vibration.vibrate(60);
     } else if (!capturing && wasCapturingVoice.current) {

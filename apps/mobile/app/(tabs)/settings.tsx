@@ -7,7 +7,7 @@ import { useApp } from '../../src/application/app-context';
 import { SpeechModelManager } from '../../src/application/speech-model-manager';
 import { useSpeechModel } from '../../src/application/use-speech-model';
 import type { ConfirmMode } from '../../src/domain/types';
-import { SenseVoiceModelArtifacts } from '../../src/infrastructure/speech/sense-voice-model-artifacts';
+import { StreamingZipformerModelArtifacts } from '../../src/infrastructure/speech/streaming-zipformer-model-artifacts';
 import { LoadingBlock, Screen, SectionLabel } from '../../src/ui/primitives';
 import { colors, spacing, typography } from '../../src/ui/tokens';
 
@@ -21,7 +21,7 @@ export default function SettingsScreen() {
   }, [service, tick]);
   const [mode, setMode] = useState<ConfirmMode | undefined>(settings?.confirmMode);
   const [speechModelManager] = useState(
-    () => new SpeechModelManager(new SenseVoiceModelArtifacts()),
+    () => new SpeechModelManager(new StreamingZipformerModelArtifacts()),
   );
   const speechModel = useSpeechModel(speechModelManager);
   const refreshSpeechModel = speechModel.refresh;
@@ -89,15 +89,15 @@ export default function SettingsScreen() {
             title="离线语音"
             detail={
               speechModel.state.phase === 'ready'
-                ? 'SenseVoice 模型已下载，可在本机识别'
-                : '首次使用时选择线路并下载约 228 MB'
+                ? '流式语音模型已下载，可在本机实时识别'
+                : '首次使用时选择线路并下载约 168 MB'
             }
             onPress={() => {
               if (speechModel.state.phase !== 'ready') {
                 Alert.alert('离线语音', '回到记录页，按麦克风即可选择线路并下载。');
                 return;
               }
-              Alert.alert('删除离线语音模型？', '将释放约 228 MB，不影响账本或智能整理设置。', [
+              Alert.alert('删除离线语音模型？', '将释放约 168 MB，不影响账本或智能整理设置。', [
                 { text: '取消', style: 'cancel' },
                 {
                   text: '删除',

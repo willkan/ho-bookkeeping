@@ -18,7 +18,7 @@
 - 后台解析：SQLite 持久化作业表 + 前台 worker + `expo-background-task` 补充调度
 - **AI 调用（一期确认）**：个人 BYOK — 客户端用官方 OpenAI JS/TS SDK 直接调用用户配置的**一个** OpenAI 兼容 Chat Completions 端点（如 DeepSeek）；**不**部署 Cloudflare AI 网关
 - AI 模型：用户在设置中显式填写 model 字符串；模型名是运行配置，不进入账本合同；无自动 model fallback
-- **语音输入（一期确认）**：`expo-audio@57.0.2` 负责用户控制的前台临时录音；`react-native-sherpa-onnx@0.4.3` + SenseVoiceSmall INT8 负责录后设备端转写。模型首次使用时按需下载；不再依赖系统语音识别或第三方云 ASR
+- **语音输入（一期确认）**：`react-native-sherpa-onnx@0.4.3` 负责 16 kHz PCM 麦克风流与 Streaming Zipformer INT8 的设备端增量识别；`expo-audio@57.0.2` 只复用跨端麦克风权限 API。模型首次使用时按需下载；不生成录音文件，不依赖系统语音识别或第三方云 ASR
 - 文件导出：客户端本地生成 `.xlsx`，写入 `expo-file-system` 后调用系统分享面板；具体 xlsx 库先做一个真机 spike 再冻结
 - 敏感数据：SQLite 启用 SQLCipher，密钥保存在系统安全存储；**Provider API Key 仅存 expo-secure-store**，永不入 SQLite/日志/导出
 - 测试：纯领域规则单元测试 + SQLite 真库集成测试 + iOS/Android 关键路径 E2E
@@ -93,37 +93,35 @@ UI 只调用应用服务与配置用例，不直接拼 SQL 或散落调用模型
 
 1. **事实源**：仍为 SQLite 原文与作业行；语音**不**写入账本实体。
 2. **状态机**：`LedgerService` 提交路径不变；语音**不得**绕过「记下来」。
-3. **语音会话**：应用层可测的瞬时状态机（idle / 请求权限 / 录音中 / 转写中 / 可恢复错误）。
-4. **采集边界**：`VoiceRecorderPort` + `ExpoVoiceRecorder`；只负责前台录音与临时文件清理。
-5. **转写边界**：`SpeechTranscriberPort` + `SherpaSenseVoiceTranscriber`；只接收已经结束的本地音频 URI，不能打开麦克风或控制录音生命周期。原生模块 import **仅**在 `src/infrastructure/speech/`。
-6. **模型边界**：`SpeechModelManagerPort` 管理固定清单、显式来源、下载进度、完整性校验、ready 发布与删除；模型文件不是账本数据。
-7. **Fake**：测试只 fake 录音、本地转写和模型文件传输边界，不 fake `LedgerService` / SQLite。
+3. **语音会话**：应用层可测的瞬时状态机（idle / 请求权限 / streaming / finalizing / 可恢复错误）；增量文字是预览，最终文字才合入受控原文。
+4. **采集与识别边界**：`StreamingSpeechPort` + `SherpaStreamingSpeech`；一个端口拥有麦克风 PCM、online recognizer、订阅和取消的共同生命周期，避免跨层拼接两个并发状态机。原生模块 import **仅**在 `src/infrastructure/speech/`。
+5. **模型边界**：`SpeechModelManagerPort` 管理固定清单、显式来源、下载进度、完整性校验、ready 发布与删除；模型文件不是账本数据。
+6. **Fake**：测试只 fake 流式语音和模型文件传输边界，不 fake `LedgerService` / SQLite。
 
 #### 依赖与原生证明
 
-- 精确版本：`expo-audio@57.0.2`、`react-native-sherpa-onnx@0.4.3` 及其原生 peer dependency 均为 `apps/mobile` 直接依赖（autolinking）。
+- 精确版本：`expo-audio@57.0.2`、`react-native-sherpa-onnx@0.4.3` 及其原生 peer dependency 均为 `apps/mobile` 直接依赖（autolinking）；前者只提供权限 API。
 - Expo config：两端只声明麦克风权限，不再声明系统 speech recognition 权限或 Android recognition service package visibility；不启用后台录音。
 - 本仓库使用 Expo 57.0.7 / RN 0.86：peerDependencies 宽松**不能**单独作为兼容证明；必须以**干净 prebuild + iOS 与 Android 真机/模拟器原生编译**为通过线。若因真实兼容原因无法原生编译，**完整移除**该依赖与半集成路径，不得保留 fallback。
 
 #### 运行合同
 
-- 录音：`expo-audio` 写入 App cache，前台、用户松开才停止；录音期间不得启动识别推理。
-- 转写：固定模型 `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09`；`modelType: sense_voice`、`preferInt8: true`、`language: zh`、`useItn: true`、CPU provider；只接受已经停止写入的本地临时音频。
-- 录音格式为 16 kHz 单声道语音；音频解码与重采样由窄 sherpa 原生适配器完成，不在 JS 中复制大块 PCM。
-- 模型清单固定模型 ID、两个文件、字节数、SHA-256 和两个显式来源：国内镜像与 Hugging Face 境外源。下载到临时目录，逐文件校验，最后写 ready 标记；校验失败不得提供“仍然使用”选项。
+- 流式会话：sherpa 原生采集器产生 16 kHz 单声道 PCM；每个音频块按顺序进入同一个 online recognizer stream 并返回增量结果。JS 层不得并发处理音频块或创建录音文件。
+- 转写：固定模型 `sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30`；`modelType: transducer`、greedy search、CPU provider。用户松手时先停止采集，再等待已排队音频块完成、调用 `inputFinished`、冲刷可解码帧并读取最终结果。
+- 增量结果只投影到瞬时 `partialText`；端点检测不能自动结束按住会话或重复提交片段。最终结果只在松手后合入受控原文一次。
+- 模型清单固定模型 ID、四个文件、字节数、SHA-256 和两个显式来源：国内镜像与 Hugging Face 境外源。下载到临时目录，逐文件校验，最后写 ready 标记；校验失败不得提供“仍然使用”选项。
 - 不根据网络失败自动切换下载源。下载来源只改变传输 URL，不改变模型 ID、校验值、运行配置或识别合同。
 - 语音首次使用弹窗展示体积、离线隐私说明、来源选择、进度、失败和重试；模型未就绪时不得启动录音。模型删除入口不删除账本或 AI 提供商配置。
-- 必须披露：录音临时保存在本机缓存并在转写后删除；模型下载完成后识别完全在本机进行。
-- 页面卸载 / App 进入后台：取消录音或忽略已取消的推理结果并清理当前临时文件；不启用后台录音。模型下载状态独立于录音会话，可从中断状态显式重试。
+- 必须披露：语音不生成录音文件，模型下载完成后识别完全在本机进行。
+- 页面卸载 / App 进入后台：停止 PCM 采集、取消订阅并释放当前识别流；不启用后台录音。模型下载状态独立于语音会话，可从中断状态显式重试。
 - 权限拒绝、模型未就绪、模型加载失败、无语音、busy、interrupted 等映射为显式中文可恢复状态；不存在 network 转写错误。
 
 #### 目录
 
 ```text
-src/application/ports/voice-recorder.ts       # 前台录音与临时文件生命周期
-src/application/ports/speech-transcriber.ts   # 已结束音频 → 文本
+src/application/ports/streaming-speech.ts     # 麦克风权限与流式识别会话合同
 src/application/ports/speech-model-manager.ts # 固定模型下载与生命周期
-src/application/voice-session.ts              # 可测录音—转写状态机
+src/application/voice-session.ts              # 可测按住—增量预览—最终合入状态机
 src/infrastructure/speech/                    # 原生 import 与生产适配器
 ```
 
@@ -260,7 +258,7 @@ packages/contracts/    # 解析请求/候选响应 schema（本地校验用）
 - BYOK / AI 合同：secure 持久化无密钥泄漏、URL 校验、掩码与清空、SDK 请求形状、DeepSeek 风格 base URL/model、非法 JSON/schema 失败、多记录整表校验、配置变更与重启后作业、源码守卫禁止 key 入日志/导出/SQLite
 - AI 合同测试：固定输入/输出 fixture；fake 只替换 transport，不伪造应用服务或数据库
 - 语音模型单测：首次使用必须明确选择来源；国内/境外 URL 映射到同一文件清单；字节数与 SHA-256 校验；半包不可见；中断、空间不足、校验失败、重试和删除
-- 语音会话单测：权限通过/拒绝、模型未就绪不录音、按下开始且不启动转写、松开才停止、权限弹窗期间松开不得迟发录音、屏幕阅读器点按切换、停止后才本地转写完整临时音频、保留已键入原文、无语音/错误/取消、卸载/后台清理、不自动提交/不创建 SQLite 作业、临时文件清理
+- 语音会话单测：权限通过/拒绝、模型未就绪不收音、按下建立单一流、增量预览不提交、短暂停顿不停止、松开才停止并最终合入一次、权限弹窗期间松开不得迟发收音、屏幕阅读器点按切换、保留已键入原文、无语音/异步错误/取消、卸载/后台释放、不自动提交/不创建 SQLite 作业
 - 双端 E2E：快速连续记账、杀进程后续跑、三条独立记录、逐条编辑、模式跳出、优惠券抵扣、导出
 
 默认 gate 保护领域合同、状态机和 SQLite 真库；真实联网 smoke 单独运行，不能成为本地账本正确性的前置条件。语音识别质量以实体设备验收；模拟器路径不能冒充实机识别通过。

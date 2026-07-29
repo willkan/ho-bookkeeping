@@ -1,26 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
-  SENSE_VOICE_MODEL,
+  STREAMING_SPEECH_MODEL,
   getSpeechModelDownloadUrl,
   totalSpeechModelBytes,
 } from './speech-model';
 
-describe('local speech model contract', () => {
-  it('pins one SenseVoice INT8 model with immutable file integrity metadata', () => {
-    expect(SENSE_VOICE_MODEL.id).toBe('sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09');
-    expect(SENSE_VOICE_MODEL.files).toEqual([
-      {
-        name: 'model.int8.onnx',
-        bytes: 237_115_547,
-        sha256: '12ca1a2ae7ecf3e0019ef2822307ee0b5cadc9196569e379b4c4026f8205276d',
-      },
-      {
-        name: 'tokens.txt',
-        bytes: 315_894,
-        sha256: 'f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc',
-      },
+describe('local streaming speech model contract', () => {
+  it('pins one Chinese Streaming Zipformer INT8 model with immutable integrity metadata', () => {
+    expect(STREAMING_SPEECH_MODEL.id).toBe('sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30');
+    expect(STREAMING_SPEECH_MODEL.files.map((file) => file.name)).toEqual([
+      'encoder.int8.onnx',
+      'decoder.onnx',
+      'joiner.int8.onnx',
+      'tokens.txt',
     ]);
-    expect(totalSpeechModelBytes()).toBe(237_431_441);
+    expect(STREAMING_SPEECH_MODEL.files.every((file) => file.sha256.length === 64)).toBe(true);
+    expect(totalSpeechModelBytes()).toBe(167_360_920);
   });
 
   it('uses distinct visible hosts without changing the pinned revision', () => {
@@ -29,7 +24,7 @@ describe('local speech model contract', () => {
 
     expect(new URL(domestic).host).toBe('hf-mirror.com');
     expect(new URL(international).host).toBe('huggingface.co');
-    expect(domestic).toContain(SENSE_VOICE_MODEL.revision);
-    expect(international).toContain(SENSE_VOICE_MODEL.revision);
+    expect(domestic).toContain(STREAMING_SPEECH_MODEL.revision);
+    expect(international).toContain(STREAMING_SPEECH_MODEL.revision);
   });
 });
