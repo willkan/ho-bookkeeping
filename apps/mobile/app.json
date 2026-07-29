@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "清简账本",
+    "slug": "bookkeeping",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "bookkeeping",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.bookkeeping.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#F6FAF8"
+      },
+      "package": "com.bookkeeping.app"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-dev-client",
+      "expo-background-task",
+      [
+        "expo-sqlite",
+        {
+          "useSQLCipher": true,
+          "enableFTS": true
+        }
+      ],
+      "expo-font",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "用于临时录下记账语音；停止后在本机离线转写，转写完成即删除录音。"
+        }
+      ],
+      "expo-sharing"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

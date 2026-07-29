@@ -1,0 +1,31 @@
+{
+  "name": "bookkeeping",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "format": "prettier --write \"apps/**/*.{ts,tsx,js,json,md}\" \"packages/**/*.{ts,tsx,js,json,md}\" \"README.md\" \"package.json\"",
+    "format:check": "prettier --check \"apps/**/*.{ts,tsx,js,json,md}\" \"packages/**/*.{ts,tsx,js,json,md}\" \"README.md\" \"package.json\"",
+    "doctor": "npm run doctor -w @bookkeeping/mobile",
+    "export:ios": "npm run export:ios -w @bookkeeping/mobile",
+    "export:android": "npm run export:android -w @bookkeeping/mobile"
+  },
+  "devDependencies": {
+    "prettier": "3.5.3",
+    "typescript": "6.0.3"
+  },
+  "overrides": {
+    "react": "19.2.3",
+    "react-native": "0.86.0",
+    "typescript": "6.0.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

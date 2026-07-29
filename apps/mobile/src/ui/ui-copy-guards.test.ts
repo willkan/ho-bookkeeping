@@ -1,0 +1,152 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+const APP_ROOT = join(__dirname, '../..');
+
+describe('UI product-copy guards', () => {
+  it('record submit uses a non-blocking acknowledgement and never awaits queue execution', () => {
+    const src = readFileSync(join(APP_ROOT, 'app/(tabs)/index.tsx'), 'utf8');
+    expect(src).toContain('已保存，正在整理');
+    expect(src).toContain('void refresh()');
+    expect(src).not.toContain("Alert.alert('已记下'");
+    expect(src).not.toContain('await refresh()');
+  });
+
+  it('record editor exposes only checkout amounts and not coupon implementation fields', () => {
+    const src = readFileSync(join(APP_ROOT, 'app/record/[id].tsx'), 'utf8');
+    expect(src).toContain('优惠券抵扣（元）');
+    expect(src).not.toMatch(/券ID|券成本|券面值|支付构成/);
+    expect(src).not.toContain('支付构成 JSON');
+    expect(src).not.toContain('发生时间 ISO');
+    expect(src).not.toContain('label="时区"');
+  });
+
+  it('record detail preserves direction internally without exposing it as a user field', () => {
+    const src = readFileSync(join(APP_ROOT, 'app/record/[id].tsx'), 'utf8');
+    expect(src).toContain('direction: record.direction');
+    expect(src).not.toContain('directionLabel');
+    expect(src).not.toContain('setDirection');
+    expect(src).not.toContain('>方向</Text>');
+    expect(src).not.toContain('<Row label="类型"');
+  });
+
+  it('ledger rows prefer the meaningful note when the merchant is empty', () => {
+    const src = readFileSync(join(APP_ROOT, 'app/today.tsx'), 'utf8');
+    expect(src).toContain("const title = r.merchant || r.note || '未命名记录'");
+    expect(src).toContain('accessibilityLabel={`记录 ${title}`}');
+  });
+
+  it('saving provider settings never waits for queued AI work', () => {
+    const src = readFileSync(join(APP_ROOT, 'src/application/app-context.tsx'), 'utf8');
+    const reloadBlock = src.slice(
+      src.indexOf('const reloadProviderConfig'),
+      src.indexOf('const value = useMemo'),
+    );
+    expect(reloadBlock).toContain('void runner.resume()');
+    expect(reloadBlock).not.toContain('await runnerRef.current.resume()');
+  });
+
+  it('tag creation lets the user choose a typed dimension', () => {
+    const tags = readFileSync(join(APP_ROOT, 'app/tags/index.tsx'), 'utf8');
+    const modes = readFileSync(join(APP_ROOT, 'app/modes/edit.tsx'), 'utf8');
+    expect(tags).toContain('TAG_TYPE_OPTIONS');
+    expect(tags).toContain('service.createTag(newType');
+    expect(modes).toContain('直接新建默认标签');
+    expect(modes).toContain('service.createTag(newTagType');
+  });
+
+  it('mode default-tag creation uses an accessible add icon instead of a text primary button', () => {
+    const modes = readFileSync(join(APP_ROOT, 'app/modes/edit.tsx'), 'utf8');
+    expect(modes).toContain('<Ionicons name="add"');
+    expect(modes).toContain('accessibilityLabel="添加默认标签"');
+    expect(modes).not.toContain('label="添加"');
+  });
+
+  // Positive: secondary stack screens never expose Expo group name as iOS back title
+  it('root stack prevents (tabs) as header back title', () => {
+    const src = readFileSync(join(APP_ROOT, 'app/_layout.tsx'), 'utf8');
+    expect(src).toMatch(/headerBackTitle:\s*['"]返回['"]/);
+    expect(src).toMatch(/headerBackButtonDisplayMode:\s*['"]minimal['"]/);
+    expect(src).toMatch(/name="\(tabs\)"[\s\S]*title:\s*['"]返回['"]/);
+  });
+
+  // Negative: implementation diagnostics do not belong in ordinary settings
+  it('settings does not expose storage or scheduling implementation language', () => {
+    const src = readFileSync(join(APP_ROOT, 'app/(tabs)/settings.tsx'), 'utf8');
+    expect(src).toContain('账本只保存在这台设备');
+    expect(src).not.toMatch(/SQLite|正式队列|后台调度|configRevision|providerHost/);
+  });
+
+  it('ledger offers an explicit mode scope and never passes mode into trend', () => {
+    const src = readFileSync(join(APP_ROOT, 'app/(tabs)/ledger.tsx'), 'utf8');
+    expect(src).toContain('label="按模式"');
+    expect(src).toContain('默认查看这个模式的全部时间');
+    const trendPush = src.slice(
+      src.indexOf("pathname: '/stats/trend'"),
+      src.indexOf('return;', src.indexOf("pathname: '/stats/trend'")),
+    );
+    expect(trendPush).not.toContain('modeId');
+  });
+
+  it('confirmation uses user-facing fields instead of raw transport fields', () => {
+    const src = readFileSync(join(APP_ROOT, 'app/confirm/[id].tsx'), 'utf8');
+    expect(src).toContain('整理出 {rows.length} 笔记录，请确认');
+    expect(src).toContain('label="本次实付（元）"');
+    expect(src).not.toMatch(/支付构成 JSON|标签 JSON|优惠券购买 JSON|发生时间 ISO|label="时区"/);
+    expect(src).not.toContain('expense|income|transfer');
+  });
+
+  it('ledger and today rows expose confirmed long-press deletion without a persistent icon', () => {
+    const ledger = readFileSync(join(APP_ROOT, 'app/(tabs)/ledger.tsx'), 'utf8');
+    const today = readFileSync(join(APP_ROOT, 'app/today.tsx'), 'utf8');
+    for (const src of [ledger, today]) {
+      expect(src).toContain('onLongPress');
+      expect(src).toContain("name: 'delete', label: '删除记录'");
+      expect(src).not.toContain('name="trash-outline"');
+      expect(src).not.toContain('name="ellipsis-horizontal"');
+      expect(src).toContain("Alert.alert('删除这条记录？'");
+      expect(src).toContain("text: '删除记录'");
+      expect(src).toContain('service.softDeleteConsumption');
+    }
+  });
+
+  it('tag management exposes merge-safe deletion rather than hiding a hard delete', () => {
+    const src = readFileSync(join(APP_ROOT, 'app/tags/index.tsx'), 'utf8');
+    expect(src).toContain('service.deleteTag(tag.id)');
+    expect(src).toContain('name="trash-outline"');
+    expect(src).toMatch(/Alert\.alert\(\s*['"]无法删除['"]/);
+  });
+
+  // Negative: record home must not ship development money format placeholder
+  it('record home has no development amount placeholder', () => {
+    const src = readFileSync(join(APP_ROOT, 'app/(tabs)/index.tsx'), 'utf8');
+    expect(src.includes('金额示例')).toBe(false);
+    expect(src.includes('formatYuan(10000)')).toBe(false);
+    expect(src.includes('仅展示格式')).toBe(false);
+  });
+
+  // Positive: voice disclosure explains temporary capture and device-only transcription
+  it('voice session ships Chinese record-then-transcribe disclosure', () => {
+    const src = readFileSync(join(APP_ROOT, 'src/application/voice-session.ts'), 'utf8');
+    expect(src).toMatch(/识别完全在本机进行/);
+    expect(src).toMatch(/录音仅临时保存在本机，转写后删除/);
+    expect(src).toMatch(/正在录音，松开结束/);
+    expect(src).toMatch(/按住说话/);
+    expect(src).toMatch(/权限已开启，请再按住说话/);
+    expect(src).toMatch(/正在转成文字/);
+    expect(src).toMatch(/没有识别到语音/);
+    expect(src).toMatch(/未获得麦克风权限/);
+  });
+
+  it('record home binds hold/release gestures and preserves a screen-reader toggle', () => {
+    const src = readFileSync(join(APP_ROOT, 'app/(tabs)/index.tsx'), 'utf8');
+
+    expect(src).toContain('screenReaderEnabled ? onAccessibleMicPress : undefined');
+    expect(src).toContain('onPressIn={screenReaderEnabled ? undefined : onMicPress}');
+    expect(src).toContain('onPressOut={screenReaderEnabled ? undefined : onMicRelease}');
+    expect(src).toContain("speechModel.state.phase !== 'ready'");
+    expect(src).toContain('<SpeechModelDownloadModal');
+    expect(src).not.toContain('onPress={voice.toggleMic}');
+  });
+});
