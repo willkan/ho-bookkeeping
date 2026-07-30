@@ -29,8 +29,8 @@ export type StreamingSpeechObserver = {
 };
 
 /**
- * Owns one microphone PCM stream and its online recognizer stream as a single
- * lifecycle. Implementations never write audio files or submit ledger input.
+ * Owns one microphone PCM stream, VAD segmenter, and local recognizer as a
+ * single lifecycle. Implementations never write audio files or submit ledger input.
  */
 export interface StreamingSpeechPort {
   isAvailable(): boolean;

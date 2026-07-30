@@ -1,10 +1,11 @@
 import { getRecordingPermissionsAsync, requestRecordingPermissionsAsync } from 'expo-audio';
 import { createPcmLiveStream, type PcmLiveStreamHandle } from 'react-native-sherpa-onnx/audio';
+import { createSTT, type SttEngine } from 'react-native-sherpa-onnx/stt';
 import {
-  createStreamingSTT,
-  type StreamingSttEngine,
-  type SttStream,
-} from 'react-native-sherpa-onnx/stt';
+  createVoiceActivityDetector,
+  type VoiceActivityDetector,
+  type VoiceActivitySegment,
+} from 'sherpa-vad';
 import {
   StreamingSpeechError,
   type StreamingSpeechObserver,
@@ -20,7 +21,9 @@ const logger = createMobileLogger('streaming-speech');
 type ActiveSession = {
   generation: number;
   mic: PcmLiveStreamHandle;
-  stream: SttStream;
+  vad: VoiceActivityDetector;
+  observer: StreamingSpeechObserver;
+  transcripts: string[];
   removeDataListener: () => void;
   removeErrorListener: () => void;
   processing: Promise<void>;
@@ -30,8 +33,21 @@ type ActiveSession = {
   finalizing: boolean;
 };
 
+function joinSegments(segments: readonly string[]): string {
+  return segments.reduce((combined, segment) => {
+    const next = segment.trim();
+    if (!next) return combined;
+    if (!combined) return next;
+    if (/\s$/.test(combined) || /^\s/.test(next)) return combined + next;
+    const left = combined[combined.length - 1]!;
+    const right = next[0]!;
+    const isCjk = (value: string) => /[\u3400-\u9fff]/.test(value);
+    return isCjk(left) || isCjk(right) ? combined + next : `${combined} ${next}`;
+  }, '');
+}
+
 export class SherpaStreamingSpeech implements StreamingSpeechPort {
-  private engine: StreamingSttEngine | null = null;
+  private engine: SttEngine | null = null;
   private active: ActiveSession | null = null;
   private generation = 0;
 
@@ -54,12 +70,23 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
   async start(observer: StreamingSpeechObserver): Promise<void> {
     if (this.active) throw new StreamingSpeechError('busy');
     const generation = ++this.generation;
-    const engine = await this.getOrCreateEngine();
-    let stream: SttStream | null = null;
+    const modelPath = await this.requireModelPath();
+    await this.getOrCreateEngine(modelPath);
+    let vad: VoiceActivityDetector | null = null;
     let mic: PcmLiveStreamHandle | null = null;
 
     try {
-      stream = await engine.createStream();
+      vad = await createVoiceActivityDetector({
+        modelPath: `${modelPath}/silero_vad.onnx`,
+        sampleRate: SAMPLE_RATE,
+        threshold: 0.5,
+        minSilenceDuration: 0.25,
+        minSpeechDuration: 0.25,
+        windowSize: 512,
+        maxSpeechDuration: 5,
+        numThreads: 1,
+        provider: 'cpu',
+      });
       mic = createPcmLiveStream({
         sampleRate: SAMPLE_RATE,
         channelCount: 1,
@@ -68,7 +95,9 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
       const session: ActiveSession = {
         generation,
         mic,
-        stream,
+        vad,
+        observer,
+        transcripts: [],
         removeDataListener: () => {},
         removeErrorListener: () => {},
         processing: Promise.resolve(),
@@ -82,17 +111,18 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
         session.processing = session.processing
           .then(async () => {
             if (session.cancelled) return;
-            const { result } = await stream!.processAudioChunk(samples, sampleRate);
-            if (this.active === session && !session.finalizing) {
-              observer.onPartial(result.text);
+            if (sampleRate !== SAMPLE_RATE) {
+              throw new Error(`Unexpected PCM sample rate: ${sampleRate}`);
             }
+            const segments = await session.vad.acceptWaveform(Array.from(samples));
+            await this.recognizeSegments(session, segments);
           })
           .catch((error: unknown) => {
-            this.signalFailure(session, observer, 'recognition-failed', error);
+            this.signalFailure(session, 'recognition-failed', error);
           });
       });
       session.removeErrorListener = mic.onError((message) => {
-        this.signalFailure(session, observer, 'capture-failed', new Error(message));
+        this.signalFailure(session, 'capture-failed', new Error(message));
       });
       this.active = session;
       await mic.start();
@@ -100,10 +130,11 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
         generation,
         sample_rate: SAMPLE_RATE,
         buffer_frames: BUFFER_SIZE_FRAMES,
+        recognition: 'sense_voice_vad',
       });
     } catch (error) {
       if (this.active?.generation === generation) this.active = null;
-      await this.releasePartialSession(mic, stream);
+      await this.releasePartialSession(mic, vad);
       if (error instanceof StreamingSpeechError) throw error;
       logger.error('stream_start_failed', {
         generation,
@@ -111,7 +142,7 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
           error instanceof Error ? error.message : String(error),
         ),
       });
-      throw new StreamingSpeechError(stream ? 'capture-failed' : 'model-load-failed');
+      throw new StreamingSpeechError(vad ? 'capture-failed' : 'model-load-failed');
     }
   }
 
@@ -138,16 +169,14 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
       if (this.active === session) this.active = null;
       await session.processing;
       if (session.failure) throw session.failure;
-      await session.stream.inputFinished();
-      while (await session.stream.isReady()) {
-        await session.stream.decode();
-      }
-      const result = await session.stream.getResult();
+      await this.recognizeSegments(session, await session.vad.flush());
+      const result = joinSegments(session.transcripts);
       logger.info('stream_finalized', {
         generation: session.generation,
-        has_text: result.text.trim().length > 0,
+        segment_count: session.transcripts.length,
+        has_text: result.length > 0,
       });
-      return result.text;
+      return result;
     } catch (error) {
       if (error instanceof StreamingSpeechError) throw error;
       logger.error('stream_finalize_failed', {
@@ -162,7 +191,7 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
       session.removeDataListener();
       session.removeErrorListener();
       if (this.active === session) this.active = null;
-      await this.releaseStream(session.stream);
+      await this.ignoreError(() => session.vad.destroy());
     }
   }
 
@@ -175,7 +204,8 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
     session.removeDataListener();
     session.removeErrorListener();
     await this.ignoreError(() => session.mic.stop());
-    await this.ignoreError(() => session.stream.release());
+    await this.ignoreError(() => session.processing);
+    await this.ignoreError(() => session.vad.destroy());
     logger.info('stream_cancelled', { generation: session.generation });
   }
 
@@ -186,23 +216,31 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
     if (engine) await this.ignoreError(() => engine.destroy());
   }
 
-  private async getOrCreateEngine(): Promise<StreamingSttEngine> {
-    if (this.engine) return this.engine;
+  private async requireModelPath(): Promise<string> {
     const modelPath = await this.modelManager.getReadyPath();
     if (!modelPath) throw new StreamingSpeechError('model-not-ready');
+    return modelPath;
+  }
+
+  private async getOrCreateEngine(modelPath: string): Promise<SttEngine> {
+    if (this.engine) return this.engine;
     try {
-      this.engine = await createStreamingSTT({
+      this.engine = await createSTT({
         modelPath: { type: 'file', path: modelPath },
-        modelType: 'transducer',
-        enableEndpoint: false,
-        decodingMethod: 'greedy_search',
+        preferInt8: true,
+        modelType: 'sense_voice',
         numThreads: 2,
         provider: 'cpu',
         dither: 0,
         debug: false,
-        enableInputNormalization: false,
+        modelOptions: {
+          senseVoice: {
+            language: 'auto',
+            useItn: true,
+          },
+        },
       });
-      logger.info('engine_loaded', { model: 'streaming-zipformer-zh-int8' });
+      logger.info('engine_loaded', { model: 'sense_voice_2024_07_17_int8' });
       return this.engine;
     } catch (error) {
       logger.error('engine_load_failed', {
@@ -214,9 +252,24 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
     }
   }
 
+  private async recognizeSegments(
+    session: ActiveSession,
+    segments: readonly VoiceActivitySegment[],
+  ): Promise<void> {
+    for (const segment of segments) {
+      if (session.cancelled) return;
+      const result = await this.engine!.transcribeSamples(segment.samples, SAMPLE_RATE);
+      const text = result.text.trim();
+      if (!text) continue;
+      session.transcripts.push(text);
+      if (this.active === session && !session.finalizing) {
+        session.observer.onPartial(joinSegments(session.transcripts));
+      }
+    }
+  }
+
   private signalFailure(
     session: ActiveSession,
-    observer: StreamingSpeechObserver,
     code: 'capture-failed' | 'recognition-failed',
     error: unknown,
   ): void {
@@ -228,20 +281,16 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
       diagnostic: sanitizeDiagnosticMessage(error instanceof Error ? error.message : String(error)),
     });
     if (this.active === session && !session.finalizing) {
-      observer.onError(session.failure);
+      session.observer.onError(session.failure);
     }
   }
 
   private async releasePartialSession(
     mic: PcmLiveStreamHandle | null,
-    stream: SttStream | null,
+    vad: VoiceActivityDetector | null,
   ): Promise<void> {
     if (mic) await this.ignoreError(() => mic.stop());
-    if (stream) await this.ignoreError(() => stream.release());
-  }
-
-  private async releaseStream(stream: SttStream): Promise<void> {
-    await this.ignoreError(() => stream.release());
+    if (vad) await this.ignoreError(() => vad.destroy());
   }
 
   private async ignoreError(action: () => Promise<void>): Promise<void> {

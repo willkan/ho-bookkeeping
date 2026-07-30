@@ -32,7 +32,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "用于临时录下记账语音；停止后在本机离线转写，转写完成即删除录音。"
+          "microphonePermission": "用于在本机实时识别记账语音；音频不会保存为文件或上传。"
         }
       ],
       "expo-sharing"

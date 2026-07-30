@@ -1,0 +1,25 @@
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+apply plugin: 'expo-module-gradle-plugin'
+
+group = 'expo.modules.sherpavad'
+version = '0.1.0'
+
+android {
+  namespace 'expo.modules.sherpavad'
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+dependencies {
+  implementation project(':react-native-sherpa-onnx')
+  implementation files("${project(':react-native-sherpa-onnx').buildDir}/sherpa-onnx-classes/classes.jar")
+}
+
+afterEvaluate {
+  tasks.matching { it.name == 'compileDebugKotlin' || it.name == 'compileReleaseKotlin' }.configureEach {
+    dependsOn project(':react-native-sherpa-onnx').tasks.named('extractSherpaOnnxClasses')
+  }
+}

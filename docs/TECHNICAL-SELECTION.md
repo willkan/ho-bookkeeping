@@ -18,7 +18,7 @@
 - 后台解析：SQLite 持久化作业表 + 前台 worker + `expo-background-task` 补充调度
 - **AI 调用（一期确认）**：个人 BYOK — 客户端用官方 OpenAI JS/TS SDK 直接调用用户配置的**一个** OpenAI 兼容 Chat Completions 端点（如 DeepSeek）；**不**部署 Cloudflare AI 网关
 - AI 模型：用户在设置中显式填写 model 字符串；模型名是运行配置，不进入账本合同；无自动 model fallback
-- **语音输入（一期确认）**：`react-native-sherpa-onnx@0.4.3` 负责 16 kHz PCM 麦克风流与 Streaming Zipformer INT8 的设备端增量识别；`expo-audio@57.0.2` 只复用跨端麦克风权限 API。模型首次使用时按需下载；不生成录音文件，不依赖系统语音识别或第三方云 ASR
+- **语音输入（一期确认）**：`react-native-sherpa-onnx@0.4.3` 负责 16 kHz PCM 麦克风流与 SenseVoiceSmall INT8 离线识别；Silero VAD 按 sherpa-onnx 官方参数对 PCM 分段，停顿后模拟流式返回稳定语段。当前 RN SDK 的 VAD 导出仍是占位实现，因此项目只补一个直接调用同版本 sherpa 原生 VAD 的薄桥；`expo-audio@57.0.2` 只复用跨端麦克风权限 API。模型首次使用时按需下载；不生成录音文件，不依赖系统语音识别或第三方云 ASR
 - 文件导出：客户端本地生成 `.xlsx`，写入 `expo-file-system` 后调用系统分享面板；具体 xlsx 库先做一个真机 spike 再冻结
 - 敏感数据：SQLite 启用 SQLCipher，密钥保存在系统安全存储；**Provider API Key 仅存 expo-secure-store**，永不入 SQLite/日志/导出
 - 测试：纯领域规则单元测试 + SQLite 真库集成测试 + iOS/Android 关键路径 E2E
@@ -93,8 +93,8 @@ UI 只调用应用服务与配置用例，不直接拼 SQL 或散落调用模型
 
 1. **事实源**：仍为 SQLite 原文与作业行；语音**不**写入账本实体。
 2. **状态机**：`LedgerService` 提交路径不变；语音**不得**绕过「记下来」。
-3. **语音会话**：应用层可测的瞬时状态机（idle / 请求权限 / streaming / finalizing / 可恢复错误）；增量文字是预览，最终文字才合入受控原文。
-4. **采集与识别边界**：`StreamingSpeechPort` + `SherpaStreamingSpeech`；一个端口拥有麦克风 PCM、online recognizer、订阅和取消的共同生命周期，避免跨层拼接两个并发状态机。原生模块 import **仅**在 `src/infrastructure/speech/`。
+3. **语音会话**：应用层可测的瞬时状态机（idle / 请求权限 / streaming / finalizing / 可恢复错误）；已完成语段是稳定预览，最终合并文字才写入受控原文。
+4. **采集与识别边界**：`StreamingSpeechPort` + `SherpaStreamingSpeech`；一个端口拥有麦克风 PCM、Silero VAD、SenseVoice、订阅和取消的共同生命周期。原生模块 import **仅**在 `src/infrastructure/speech/`；`modules/sherpa-vad` 是 RN SDK 缺口的原生基础设施桥，不承载应用状态。
 5. **模型边界**：`SpeechModelManagerPort` 管理固定清单、显式来源、下载进度、完整性校验、ready 发布与删除；模型文件不是账本数据。
 6. **Fake**：测试只 fake 流式语音和模型文件传输边界，不 fake `LedgerService` / SQLite。
 
@@ -106,10 +106,10 @@ UI 只调用应用服务与配置用例，不直接拼 SQL 或散落调用模型
 
 #### 运行合同
 
-- 流式会话：sherpa 原生采集器产生 16 kHz 单声道 PCM；每个音频块按顺序进入同一个 online recognizer stream 并返回增量结果。JS 层不得并发处理音频块或创建录音文件。
-- 转写：固定模型 `sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30`；`modelType: transducer`、greedy search、CPU provider。用户松手时先停止采集，再等待已排队音频块完成、调用 `inputFinished`、冲刷可解码帧并读取最终结果。
-- 增量结果只投影到瞬时 `partialText`；端点检测不能自动结束按住会话或重复提交片段。最终结果只在松手后合入受控原文一次。
-- 模型清单固定模型 ID、四个文件、字节数、SHA-256 和两个显式来源：国内镜像与 Hugging Face 境外源。下载到临时目录，逐文件校验，最后写 ready 标记；校验失败不得提供“仍然使用”选项。
+- 模拟流式会话：sherpa 原生采集器产生 16 kHz 单声道 PCM；每个音频块串行进入同一个 Silero VAD。VAD 产出的完整语段按顺序交给同一个 SenseVoice offline recognizer，识别期间不并发处理语段，不创建录音文件。
+- 转写：固定模型 `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17` 的 `model.int8.onnx`；`modelType: sense_voice`、自动语言、ITN、greedy search、2 threads、CPU provider。Silero VAD 使用官方 Android 示例默认值：threshold 0.5、minimum silence 0.25 秒、minimum speech 0.25 秒、window 512、maximum speech 5 秒；用户松手时先停止采集，再等待已排队 PCM 完成、调用 VAD `flush()` 并识别尾段。
+- 已完成语段按顺序合并后只投影到瞬时 `partialText`；VAD 分段不能自动结束按住会话或把片段写进正式输入。最终合并结果只在松手后合入受控原文一次。
+- 模型清单固定 SenseVoice revision、官方 Silero VAD、三个文件、字节数、SHA-256 和两个显式来源：国内镜像与 Hugging Face 境外源；小型 VAD 文件使用 sherpa-onnx 官方 GitHub Release。下载到临时目录，逐文件校验，最后写 ready 标记；校验失败不得提供“仍然使用”选项。
 - 不根据网络失败自动切换下载源。下载来源只改变传输 URL，不改变模型 ID、校验值、运行配置或识别合同。
 - 语音首次使用弹窗展示体积、离线隐私说明、来源选择、进度、失败和重试；模型未就绪时不得启动录音。模型删除入口不删除账本或 AI 提供商配置。
 - 必须披露：语音不生成录音文件，模型下载完成后识别完全在本机进行。

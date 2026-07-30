@@ -17,7 +17,7 @@ import { useSpeechModel } from '../../src/application/use-speech-model';
 import { useVoiceSession } from '../../src/application/use-voice-session';
 import type { ModeTagSnapshot } from '../../src/domain/types';
 import { SherpaStreamingSpeech } from '../../src/infrastructure/speech/sherpa-streaming-speech';
-import { StreamingZipformerModelArtifacts } from '../../src/infrastructure/speech/streaming-zipformer-model-artifacts';
+import { SenseVoiceVadModelArtifacts } from '../../src/infrastructure/speech/sense-voice-vad-model-artifacts';
 import {
   Chip,
   EmptyState,
@@ -49,7 +49,7 @@ export default function RecordScreen() {
   const [screenReaderEnabled, setScreenReaderEnabled] = useState(false);
   const [showSpeechModel, setShowSpeechModel] = useState(false);
   const [speechModelManager] = useState(
-    () => new SpeechModelManager(new StreamingZipformerModelArtifacts()),
+    () => new SpeechModelManager(new SenseVoiceVadModelArtifacts()),
   );
   const speechModel = useSpeechModel(speechModelManager);
   const refreshSpeechModel = speechModel.refresh;
