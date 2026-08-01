@@ -371,10 +371,10 @@ const styles = StyleSheet.create({
   micButton: {
     width: '100%',
     minHeight: 52,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.accent,
-    backgroundColor: colors.surface,
+    borderRadius: radius.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.divider,
+    backgroundColor: 'transparent',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -387,7 +387,7 @@ const styles = StyleSheet.create({
   },
   micButtonActive: {
     backgroundColor: colors.accent,
-    borderColor: colors.accent,
+    borderTopColor: colors.accent,
   },
   micButtonBusy: {
     backgroundColor: colors.accentSoft,

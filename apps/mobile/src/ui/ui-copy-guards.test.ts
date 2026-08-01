@@ -149,13 +149,15 @@ describe('UI product-copy guards', () => {
     expect(src).not.toContain('onPress={voice.toggleMic}');
   });
 
-  it('record home integrates one wide hold-to-talk action inside the input composer', () => {
+  it('record home integrates one borderless hold-to-talk action inside the input composer', () => {
     const src = readFileSync(join(APP_ROOT, 'app/(tabs)/index.tsx'), 'utf8');
 
     expect(src).toContain('styles.composer');
     expect(src).toContain('styles.micButtonLabel');
     expect(src).toContain("'正在听，松开结束'");
     expect(src).toContain("'按住说话'");
+    expect(src).toContain('borderTopWidth: StyleSheet.hairlineWidth');
+    expect(src).not.toContain('borderWidth: 1');
     expect(src).not.toContain('styles.inputRow');
     expect(src).not.toContain('立刻保存在本机，整理在后台完成');
   });
