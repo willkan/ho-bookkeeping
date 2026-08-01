@@ -179,6 +179,16 @@ export default function RecordScreen() {
     }
   };
 
+  const voiceActionLabel =
+    voice.state.phase === 'streaming'
+      ? '正在听，松开结束'
+      : voice.state.phase === 'requesting_permission'
+        ? '正在准备…'
+        : voice.state.phase === 'finalizing'
+          ? '正在完成识别…'
+          : '按住说话';
+  const showVoiceMessage = Boolean(voice.state.error || voice.state.notice);
+
   return (
     <Screen style={{ paddingTop: insets.top + spacing.sm }}>
       <View style={styles.headerRow}>
@@ -221,7 +231,7 @@ export default function RecordScreen() {
         </View>
       ) : null}
 
-      <View style={styles.inputRow}>
+      <View style={styles.composer}>
         <Field
           multiline
           value={voice.displayValue}
@@ -248,18 +258,22 @@ export default function RecordScreen() {
           style={({ pressed }) => [
             styles.micButton,
             voice.isRecording && styles.micButtonActive,
+            voice.isBusy && styles.micButtonBusy,
             pressed && styles.micPressed,
           ]}
         >
           <Ionicons
             name={voice.isRecording ? 'stop-circle' : voice.isBusy ? 'hourglass-outline' : 'mic'}
-            size={22}
+            size={24}
             color={voice.isRecording ? colors.white : colors.accent}
           />
+          <Text style={[styles.micButtonLabel, voice.isRecording && styles.micButtonLabelActive]}>
+            {voiceActionLabel}
+          </Text>
         </Pressable>
       </View>
 
-      {voice.statusMessage ? (
+      {showVoiceMessage && voice.statusMessage ? (
         <Text
           style={[styles.voiceStatus, voice.state.error ? styles.voiceError : null]}
           accessibilityRole={voice.state.error ? 'alert' : 'text'}
@@ -269,15 +283,14 @@ export default function RecordScreen() {
         </Text>
       ) : null}
 
-      <Text style={styles.hint}>立刻保存在本机，整理在后台完成</Text>
+      <Text style={styles.disclosure}>{voice.disclosure}</Text>
       {savedNotice ? (
         <Text style={styles.savedNotice} accessibilityLiveRegion="polite">
           已保存，正在整理
         </Text>
       ) : null}
-      <Text style={styles.disclosure}>{voice.disclosure}</Text>
       {configError ? (
-        <Text style={[styles.hint, { color: colors.danger }]} accessibilityRole="alert">
+        <Text style={styles.configError} accessibilityRole="alert">
           AI 未配置：{configError}
         </Text>
       ) : null}
@@ -288,8 +301,7 @@ export default function RecordScreen() {
         disabled={saving || voice.editingDisabled || !voice.displayValue.trim()}
       />
 
-      <View style={{ height: spacing.xl }} />
-      <Link href="/settings" style={{ marginTop: spacing.md }}>
+      <Link href="/settings" style={styles.settingsLink}>
         <Text style={styles.link}>设置入账方式</Text>
       </Link>
 
@@ -339,29 +351,49 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     overflow: 'hidden',
   },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
+  composer: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.divider,
+    padding: spacing.md,
     gap: spacing.sm,
   },
   inputField: {
-    flex: 1,
-    marginBottom: 0,
+    minHeight: 92,
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: spacing.xs,
+    borderWidth: 0,
+    borderRadius: 0,
+    backgroundColor: colors.surface,
   },
   micButton: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.pill,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.divider,
-    backgroundColor: colors.accentSoft,
+    width: '100%',
+    minHeight: 52,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    backgroundColor: colors.surface,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 2,
+    gap: spacing.sm,
+  },
+  micButtonLabel: {
+    color: colors.accent,
+    fontSize: 16,
+    fontWeight: '600',
   },
   micButtonActive: {
     backgroundColor: colors.accent,
     borderColor: colors.accent,
+  },
+  micButtonBusy: {
+    backgroundColor: colors.accentSoft,
+  },
+  micButtonLabelActive: {
+    color: colors.white,
   },
   micPressed: {
     opacity: 0.85,
@@ -374,18 +406,22 @@ const styles = StyleSheet.create({
   voiceError: {
     color: colors.danger,
   },
-  hint: {
-    ...typography.caption,
-    marginTop: spacing.md,
-  },
   disclosure: {
     ...typography.caption,
-    marginTop: spacing.xs,
+    marginTop: spacing.md,
     marginBottom: spacing.md,
   },
   savedNotice: {
     ...typography.caption,
     color: colors.accent,
     marginTop: spacing.xs,
+  },
+  configError: {
+    ...typography.caption,
+    color: colors.danger,
+    marginBottom: spacing.md,
+  },
+  settingsLink: {
+    marginTop: spacing.xxl,
   },
 });

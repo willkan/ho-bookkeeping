@@ -217,7 +217,7 @@ describe('voice privacy contract', () => {
   });
 
   it('discloses that streaming recognition does not create an audio file', () => {
-    expect(VOICE_COPY.disclosure).toContain('不会生成录音文件');
+    expect(VOICE_COPY.disclosure).toContain('不会保存录音');
     expect(VOICE_COPY.disclosure).toContain('本机');
   });
 });

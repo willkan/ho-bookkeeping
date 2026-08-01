@@ -17,7 +17,7 @@ export const VOICE_COPY = {
   interrupted: '语音识别被打断，可重试',
   unknown: '语音识别出错，可重试',
   holdAgain: '权限已开启，请再按住说话',
-  disclosure: '不会生成录音文件；识别完全在本机进行',
+  disclosure: '语音在本机识别，不会保存录音',
   micHold: '按住说话',
   micToggleIdle: '开始语音输入',
   micToggleStreaming: '结束语音输入',

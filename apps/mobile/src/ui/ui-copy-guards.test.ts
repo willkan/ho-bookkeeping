@@ -129,8 +129,7 @@ describe('UI product-copy guards', () => {
   // Positive: voice disclosure explains file-free, device-only streaming recognition
   it('voice session ships Chinese streaming disclosure', () => {
     const src = readFileSync(join(APP_ROOT, 'src/application/voice-session.ts'), 'utf8');
-    expect(src).toMatch(/识别完全在本机进行/);
-    expect(src).toMatch(/不会生成录音文件/);
+    expect(src).toMatch(/语音在本机识别，不会保存录音/);
     expect(src).toMatch(/正在听，松开结束/);
     expect(src).toMatch(/按住说话/);
     expect(src).toMatch(/权限已开启，请再按住说话/);
@@ -148,5 +147,16 @@ describe('UI product-copy guards', () => {
     expect(src).toContain("speechModel.state.phase !== 'ready'");
     expect(src).toContain('<SpeechModelDownloadModal');
     expect(src).not.toContain('onPress={voice.toggleMic}');
+  });
+
+  it('record home integrates one wide hold-to-talk action inside the input composer', () => {
+    const src = readFileSync(join(APP_ROOT, 'app/(tabs)/index.tsx'), 'utf8');
+
+    expect(src).toContain('styles.composer');
+    expect(src).toContain('styles.micButtonLabel');
+    expect(src).toContain("'正在听，松开结束'");
+    expect(src).toContain("'按住说话'");
+    expect(src).not.toContain('styles.inputRow');
+    expect(src).not.toContain('立刻保存在本机，整理在后台完成');
   });
 });
