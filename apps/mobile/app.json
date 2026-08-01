@@ -3,6 +3,7 @@
     "name": "清简账本",
     "slug": "bookkeeping",
     "version": "0.1.0",
+    "icon": "./assets/app-icon.png",
     "orientation": "portrait",
     "scheme": "bookkeeping",
     "userInterfaceStyle": "light",
@@ -12,6 +13,7 @@
     },
     "android": {
       "adaptiveIcon": {
+        "foregroundImage": "./assets/app-icon.png",
         "backgroundColor": "#F6FAF8"
       },
       "package": "com.bookkeeping.app"
