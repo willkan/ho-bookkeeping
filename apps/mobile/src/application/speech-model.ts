@@ -8,12 +8,17 @@ export type SpeechModelFile = {
   sha256: string;
 };
 
+export const SPEECH_MODEL_RUNTIME_DIRS = {
+  asr: 'asr',
+  vad: 'vad',
+} as const;
+
 const REPOSITORY = 'csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17';
 const SILERO_VAD_URL =
   'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx';
 
 export const SENSE_VOICE_VAD_MODEL = {
-  id: 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17-vad',
+  id: 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17',
   revision: '2365baeacb507f821a0c8120fcee3d484dba7a07',
   files: [
     {
@@ -49,4 +54,10 @@ export function getSpeechModelDownloadUrl(
 
 export function totalSpeechModelBytes(): number {
   return SENSE_VOICE_VAD_MODEL.files.reduce((total, file) => total + file.bytes, 0);
+}
+
+export function getSpeechModelRuntimeRelativePath(fileName: SpeechModelFileName): string {
+  const directory =
+    fileName === 'silero_vad.onnx' ? SPEECH_MODEL_RUNTIME_DIRS.vad : SPEECH_MODEL_RUNTIME_DIRS.asr;
+  return `${directory}/${fileName}`;
 }

@@ -12,6 +12,7 @@ import {
   type StreamingSpeechPort,
 } from '../../application/ports/streaming-speech';
 import type { SpeechModelManager } from '../../application/speech-model-manager';
+import { SPEECH_MODEL_RUNTIME_DIRS } from '../../application/speech-model';
 import { createMobileLogger, sanitizeDiagnosticMessage } from '../logging/mobile-logger';
 
 const SAMPLE_RATE = 16_000;
@@ -77,7 +78,7 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
 
     try {
       vad = await createVoiceActivityDetector({
-        modelPath: `${modelPath}/silero_vad.onnx`,
+        modelPath: `${modelPath}/${SPEECH_MODEL_RUNTIME_DIRS.vad}/silero_vad.onnx`,
         sampleRate: SAMPLE_RATE,
         threshold: 0.5,
         minSilenceDuration: 0.25,
@@ -226,7 +227,10 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
     if (this.engine) return this.engine;
     try {
       this.engine = await createSTT({
-        modelPath: { type: 'file', path: modelPath },
+        modelPath: {
+          type: 'file',
+          path: `${modelPath}/${SPEECH_MODEL_RUNTIME_DIRS.asr}`,
+        },
         preferInt8: true,
         modelType: 'sense_voice',
         numThreads: 2,

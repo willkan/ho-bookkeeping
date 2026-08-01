@@ -13,13 +13,13 @@ android {
   }
 }
 
-dependencies {
-  implementation project(':react-native-sherpa-onnx')
-  implementation files("${project(':react-native-sherpa-onnx').buildDir}/sherpa-onnx-classes/classes.jar")
-}
+evaluationDependsOn(':react-native-sherpa-onnx')
 
-afterEvaluate {
-  tasks.matching { it.name == 'compileDebugKotlin' || it.name == 'compileReleaseKotlin' }.configureEach {
-    dependsOn project(':react-native-sherpa-onnx').tasks.named('extractSherpaOnnxClasses')
-  }
+def sherpaOnnxProject = project(':react-native-sherpa-onnx')
+def sherpaOnnxClassesDir = file("${sherpaOnnxProject.buildDir}/sherpa-onnx-classes")
+
+dependencies {
+  implementation sherpaOnnxProject
+  implementation fileTree(dir: sherpaOnnxClassesDir, include: '*.jar')
+    .builtBy(sherpaOnnxProject.tasks.named('extractSherpaOnnxClasses'))
 }

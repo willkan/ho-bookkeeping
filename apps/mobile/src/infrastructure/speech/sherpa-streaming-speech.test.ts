@@ -106,7 +106,7 @@ vi.mock('sherpa-vad', () => ({
 
 function readyModelManager(): SpeechModelManager {
   return {
-    getReadyPath: vi.fn(async () => '/models/sense-voice-vad'),
+    getReadyPath: vi.fn(async () => '/models/sense-voice'),
   } as unknown as SpeechModelManager;
 }
 
@@ -136,7 +136,7 @@ describe('SherpaStreamingSpeech SenseVoice + VAD boundary', () => {
 
     expect(native.createSTT).toHaveBeenCalledWith(
       expect.objectContaining({
-        modelPath: { type: 'file', path: '/models/sense-voice-vad' },
+        modelPath: { type: 'file', path: '/models/sense-voice/asr' },
         modelType: 'sense_voice',
         preferInt8: true,
         numThreads: 2,
@@ -147,7 +147,7 @@ describe('SherpaStreamingSpeech SenseVoice + VAD boundary', () => {
       }),
     );
     expect(native.createVoiceActivityDetector).toHaveBeenCalledWith({
-      modelPath: '/models/sense-voice-vad/silero_vad.onnx',
+      modelPath: '/models/sense-voice/vad/silero_vad.onnx',
       sampleRate: 16_000,
       threshold: 0.5,
       minSilenceDuration: 0.25,

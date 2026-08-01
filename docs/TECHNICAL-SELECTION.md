@@ -110,6 +110,7 @@ UI 只调用应用服务与配置用例，不直接拼 SQL 或散落调用模型
 - 转写：固定模型 `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17` 的 `model.int8.onnx`；`modelType: sense_voice`、自动语言、ITN、greedy search、2 threads、CPU provider。Silero VAD 使用官方 Android 示例默认值：threshold 0.5、minimum silence 0.25 秒、minimum speech 0.25 秒、window 512、maximum speech 5 秒；用户松手时先停止采集，再等待已排队 PCM 完成、调用 VAD `flush()` 并识别尾段。
 - 已完成语段按顺序合并后只投影到瞬时 `partialText`；VAD 分段不能自动结束按住会话或把片段写进正式输入。最终合并结果只在松手后合入受控原文一次。
 - 模型清单固定 SenseVoice revision、官方 Silero VAD、三个文件、字节数、SHA-256 和两个显式来源：国内镜像与 Hugging Face 境外源；小型 VAD 文件使用 sherpa-onnx 官方 GitHub Release。下载到临时目录，逐文件校验，最后写 ready 标记；校验失败不得提供“仍然使用”选项。
+- 发布后的模型根目录名及其 `asr/` 完整路径不得包含 `vad` 或 `silero`，因为 `react-native-sherpa-onnx` 会按完整路径关键词探测模型类型。根目录内隔离为 `asr/`（`model.int8.onnx`、`tokens.txt`）与 `vad/`（`silero_vad.onnx`）；SDK 只扫描 `asr/`，VAD 薄桥只读取 `vad/silero_vad.onnx`。模型管理器一次性迁移已校验的旧根目录和平铺布局，不保留旧路径加载分支。
 - 不根据网络失败自动切换下载源。下载来源只改变传输 URL，不改变模型 ID、校验值、运行配置或识别合同。
 - 语音首次使用弹窗展示体积、离线隐私说明、来源选择、进度、失败和重试；模型未就绪时不得启动录音。模型删除入口不删除账本或 AI 提供商配置。
 - 必须披露：语音不生成录音文件，模型下载完成后识别完全在本机进行。
