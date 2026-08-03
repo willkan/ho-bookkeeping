@@ -189,6 +189,32 @@ export class OpenAiCompatibleParseTransport implements AiParseTransportWithMeta 
         };
       }
 
+      const contextIssuePaths = success.data.records.flatMap((record, index) =>
+        record.timezone === body.timezone ? [] : [`records.${index}.timezone`],
+      );
+      if (contextIssuePaths.length > 0) {
+        console.info('[ai-transport] response', {
+          request_id: body.request_id,
+          status: 'error',
+          error_category: 'model_output_invalid',
+          reason: 'request_context_failed',
+          latency_ms: Date.now() - started,
+          model: config.model,
+          provider_host: this.lastMeta.providerHost,
+          context_issue_paths: contextIssuePaths.slice(0, MAX_SCHEMA_ISSUES_LOGGED),
+          context_issue_count: contextIssuePaths.length,
+        });
+        return {
+          contract_version: body.contract_version,
+          request_id: body.request_id,
+          status: 'error',
+          error_category: 'model_output_invalid',
+          message: `provider JSON conflicts with request context (${contextIssuePaths
+            .slice(0, 6)
+            .join(', ')})`,
+        };
+      }
+
       console.info('[ai-transport] response', {
         request_id: body.request_id,
         status: 'ok',

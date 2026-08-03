@@ -40,6 +40,44 @@ const validRecord = {
 };
 
 describe('AI transport BYOK path', () => {
+  it('rejects a provider record that changes the request timezone', async () => {
+    const store = new MemoryProviderConfigStore();
+    await store.save(
+      buildProviderConfigForSave({
+        baseUrl: 'https://api.deepseek.com',
+        apiKey: 'sk-fake',
+        model: 'deepseek-chat',
+        existing: null,
+        keepExistingKey: false,
+      }),
+    );
+    const transport = new OpenAiCompatibleParseTransport(store, () => ({
+      chat: {
+        completions: {
+          create: vi.fn().mockResolvedValue({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    records: [{ ...validRecord, timezone: 'America/New_York' }],
+                  }),
+                },
+              },
+            ],
+          }),
+        },
+      },
+    }));
+
+    const result = await transport.parse(baseRequest);
+
+    expect(result.status).toBe('error');
+    if (result.status === 'error') {
+      expect(result.error_category).toBe('model_output_invalid');
+      expect(result.message).toMatch(/timezone/);
+    }
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });

@@ -51,7 +51,7 @@
 
 ### 2.3 投影
 
-账本列表、统计占比、趋势、模式视图和 Excel 内容都是从当前有效消费记录计算出的 read model。投影不得反向成为事实，也不得保存额外的“合计消费记录”。
+账单列表、统计占比、趋势、模式视图和 Excel 内容都是 read model。统一账单投影由两种正式事实组成：顶部未完成项读取原始输入生命周期并按 `submitted_at` 排序；日期分组读取当前有效消费记录并按 `local_date / occurred_at / source_sequence` 排序。投影不得把原始输入变成消费记录、反向成为事实，或保存额外的“合计消费记录”。独立 Today 投影与页面不再保留。
 
 ### 2.4 Transport / AI 适配（BYOK）
 
@@ -70,6 +70,7 @@
 - 从 secure store 解析当前配置；缺失则显式 `invalid_request` / 配置错误，不丢作业
 - 用官方 OpenAI SDK（`baseURL` + `apiKey` + model）调用 Chat Completions
 - 要求 JSON 对象输出（`response_format: { type: "json_object" }`），解析后对照 contracts schema
+- 以请求 `submitted_at + timezone` 解析原文中的相对/具体日期；输出沿用请求时区，本地上下文校验保证 `occurred_at` instant 转换后的日期与 `local_date` 一致
 - 记录非密钥元数据（host、model、config revision、request_id、latency 类别）
 - **永不**记录或持久化 API Key、原文金额明细到诊断日志
 
@@ -256,9 +257,9 @@ packages/contracts/    # 解析请求/候选响应 schema（本地校验用）
 
 - 领域单测：金额与抵扣关系、标签归一建议、互斥统计组、不重不漏、软删除过滤
 - 状态机单测：提交原子性、整体入账、确认模式、失败与显式重试、幂等作业
-- SQLite 真库集成：migration、事务、约束、repository、统计 SQL、导出查询
+- SQLite 真库集成：migration、事务、约束、repository、账单待处理/发生日期排序投影、统计 SQL、导出查询
 - BYOK / AI 合同：secure 持久化无密钥泄漏、URL 校验、掩码与清空、SDK 请求形状、DeepSeek 风格 base URL/model、非法 JSON/schema 失败、多记录整表校验、配置变更与重启后作业、源码守卫禁止 key 入日志/导出/SQLite
-- AI 合同测试：固定输入/输出 fixture；fake 只替换 transport，不伪造应用服务或数据库
+- AI 合同测试：固定输入/输出 fixture、相对日期提示、请求时区约束及发生 instant/本地日期一致性；fake 只替换 transport，不伪造应用服务或数据库
 - 语音模型单测：首次使用必须明确选择来源；国内/境外 URL 映射到同一文件清单；字节数与 SHA-256 校验；半包不可见；中断、空间不足、校验失败、重试和删除
 - 语音会话单测：权限通过/拒绝、模型未就绪不收音、按下建立单一流、增量预览不提交、短暂停顿不停止、松开才停止并最终合入一次、权限弹窗期间松开不得迟发收音、屏幕阅读器点按切换、保留已键入原文、无语音/异步错误/取消、卸载/后台释放、不自动提交/不创建 SQLite 作业
 - 双端 E2E：快速连续记账、杀进程后续跑、三条独立记录、逐条编辑、模式跳出、优惠券抵扣、导出

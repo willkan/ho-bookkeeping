@@ -9,7 +9,7 @@ export class ConsumptionRepository extends TagModeRepository {
       .all<ConsumptionRow>(
         `SELECT * FROM consumption_records
          WHERE deleted_at IS NULL
-         ORDER BY occurred_at DESC, raw_input_id DESC, source_sequence ASC, id ASC`,
+         ORDER BY local_date DESC, occurred_at DESC, raw_input_id DESC, source_sequence ASC, id ASC`,
       )
       .map((row) => this.hydrateConsumption(row));
   }
@@ -21,17 +21,6 @@ export class ConsumptionRepository extends TagModeRepository {
          WHERE raw_input_id = ? AND deleted_at IS NULL
          ORDER BY occurred_at ASC, source_sequence ASC, id ASC`,
         [rawInputId],
-      )
-      .map((row) => this.hydrateConsumption(row));
-  }
-
-  listConsumptionForLocalDate(localDate: string): ConsumptionRecord[] {
-    return this.db
-      .all<ConsumptionRow>(
-        `SELECT * FROM consumption_records
-         WHERE local_date = ? AND deleted_at IS NULL
-         ORDER BY occurred_at DESC, raw_input_id DESC, source_sequence ASC, id ASC`,
-        [localDate],
       )
       .map((row) => this.hydrateConsumption(row));
   }

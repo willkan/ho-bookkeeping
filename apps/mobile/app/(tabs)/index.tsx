@@ -186,8 +186,8 @@ export default function RecordScreen() {
     <Screen style={{ paddingTop: insets.top + spacing.sm }}>
       <View style={styles.headerRow}>
         <Text style={typography.title}>记录</Text>
-        <Pressable onPress={() => router.push('/today')} accessibilityLabel="今日账">
-          <Text style={styles.link}>今日账</Text>
+        <Pressable onPress={() => router.push('/ledger')} accessibilityLabel="账单">
+          <Text style={styles.link}>账单</Text>
         </Pressable>
       </View>
 

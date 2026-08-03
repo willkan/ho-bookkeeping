@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -13,9 +13,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../src/application/app-context';
+import { buildLedgerFeed } from '../../src/application/ledger-feed';
 import { formatYuan } from '../../src/domain/money';
 import type { TagMatchMode, TrendGranularity } from '../../src/domain/types';
-import { Chip, EmptyState, LoadingBlock, PrimaryButton, Screen } from '../../src/ui/primitives';
+import { LedgerFeed } from '../../src/ui/ledger-feed';
+import { Chip, LoadingBlock, PrimaryButton, Screen } from '../../src/ui/primitives';
 import { colors, radius, spacing, typography } from '../../src/ui/tokens';
 
 type AnalysisKind = 'breakdown' | 'trend';
@@ -58,27 +60,19 @@ export default function LedgerHomeScreen() {
     void tick;
     return service?.listModes() ?? [];
   }, [service, tick]);
-  const monthRecords = useMemo(() => {
+  const ledger = useMemo(() => {
     void tick;
-    if (!service) return [];
-    return service.filterRecords({
-      range: { kind: 'time', startLocalDate: defaults.start, endLocalDate: defaults.end },
-      tagIds: [],
-      tagMatch: 'and',
-    });
-  }, [service, tick, defaults.end, defaults.start]);
-
-  if (!ready || !service) {
-    return (
-      <Screen style={{ paddingTop: insets.top }}>
-        <LoadingBlock />
-      </Screen>
+    return service?.listLedger() ?? { pending: [], withdrawn: [], records: [] };
+  }, [service, tick]);
+  const feed = useMemo(() => buildLedgerFeed(ledger), [ledger]);
+  const monthRecords = useMemo(() => {
+    return ledger.records.filter(
+      (record) => record.localDate >= defaults.start && record.localDate <= defaults.end,
     );
-  }
+  }, [defaults.end, defaults.start, ledger.records]);
 
   const groupId = selectedGroupId ?? groups[0]?.id ?? null;
   const monthTotal = monthRecords.reduce((sum, record) => sum + record.actualCostMinor, 0);
-  const recent = monthRecords.slice(0, 5);
   const selectedMode = modes.find((mode) => mode.id === modeId);
   const filterSummary = [
     analysis === 'breakdown' && scope === 'mode' ? (selectedMode?.name ?? '选择模式') : '本月',
@@ -112,74 +106,101 @@ export default function LedgerHomeScreen() {
     });
   };
 
-  const confirmDeleteRecord = (recordId: string) => {
-    Alert.alert('删除这条记录？', '删除后将不再计入账本和统计。', [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '删除记录',
-        style: 'destructive',
-        onPress: () => {
-          service.softDeleteConsumption(recordId);
-          void refresh();
+  const confirmDeleteRecord = useCallback(
+    (recordId: string) => {
+      Alert.alert('删除这条记录？', '删除后将不再计入账本和统计。', [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '删除记录',
+          style: 'destructive',
+          onPress: () => {
+            if (!service) return;
+            service.softDeleteConsumption(recordId);
+            void refresh();
+          },
         },
-      },
-    ]);
-  };
+      ]);
+    },
+    [refresh, service],
+  );
+
+  const openRecord = useCallback(
+    (recordId: string) => {
+      router.push(`/record/${recordId}`);
+    },
+    [router],
+  );
+
+  const openPending = useCallback(
+    (rawInputId: string) => {
+      router.push(`/confirm/${rawInputId}`);
+    },
+    [router],
+  );
+
+  const retryPending = useCallback(
+    (rawInputId: string) => {
+      if (!service) return;
+      const raw = service.getRawInput(rawInputId);
+      Alert.alert('这次输入还没有整理成功', raw?.parseErrorMessage ?? '可以重新整理一次。', [
+        { text: '稍后处理', style: 'cancel' },
+        {
+          text: '重新整理',
+          onPress: () => {
+            service.retryParse(rawInputId);
+            void refresh();
+          },
+        },
+      ]);
+    },
+    [refresh, service],
+  );
+
+  if (!ready || !service) {
+    return (
+      <Screen style={{ paddingTop: insets.top }}>
+        <LoadingBlock />
+      </Screen>
+    );
+  }
+
+  const header = (
+    <View>
+      <Text style={typography.title}>账单</Text>
+      <View style={styles.overview}>
+        <Text style={typography.secondary}>本月消费</Text>
+        <Text style={styles.total}>¥{formatYuan(monthTotal)}</Text>
+        <Text style={typography.caption}>{monthRecords.length} 条记录</Text>
+      </View>
+
+      <View style={styles.analysisRow}>
+        <Pressable style={styles.analysisButton} onPress={() => openFilters('breakdown')}>
+          <Ionicons name="pie-chart-outline" size={22} color={colors.accent} />
+          <Text style={styles.analysisLabel}>消费占比</Text>
+        </Pressable>
+        <Pressable style={styles.analysisButton} onPress={() => openFilters('trend')}>
+          <Ionicons name="bar-chart-outline" size={22} color={colors.accent} />
+          <Text style={styles.analysisLabel}>消费趋势</Text>
+        </Pressable>
+      </View>
+
+      <Pressable style={styles.filterSummary} onPress={() => openFilters('breakdown')}>
+        <Text style={[typography.body, { flex: 1 }]}>{filterSummary}</Text>
+        <Ionicons name="options-outline" size={21} color={colors.ink} />
+      </Pressable>
+    </View>
+  );
 
   return (
     <Screen style={{ paddingTop: insets.top + spacing.sm }}>
-      <ScrollView contentContainerStyle={styles.page} showsVerticalScrollIndicator={false}>
-        <Text style={typography.title}>看账本</Text>
-        <View style={styles.overview}>
-          <Text style={typography.secondary}>本月消费</Text>
-          <Text style={styles.total}>¥{formatYuan(monthTotal)}</Text>
-          <Text style={typography.caption}>{monthRecords.length} 条记录</Text>
-        </View>
-
-        <View style={styles.analysisRow}>
-          <Pressable style={styles.analysisButton} onPress={() => openFilters('breakdown')}>
-            <Ionicons name="pie-chart-outline" size={22} color={colors.accent} />
-            <Text style={styles.analysisLabel}>消费占比</Text>
-          </Pressable>
-          <Pressable style={styles.analysisButton} onPress={() => openFilters('trend')}>
-            <Ionicons name="bar-chart-outline" size={22} color={colors.accent} />
-            <Text style={styles.analysisLabel}>消费趋势</Text>
-          </Pressable>
-        </View>
-
-        <Pressable style={styles.filterSummary} onPress={() => openFilters('breakdown')}>
-          <Text style={[typography.body, { flex: 1 }]}>{filterSummary}</Text>
-          <Ionicons name="options-outline" size={21} color={colors.ink} />
-        </Pressable>
-
-        <Text style={styles.sectionTitle}>近期消费</Text>
-        {recent.length === 0 ? (
-          <EmptyState title="这个月还没有消费" detail="记下一笔后会出现在这里" />
-        ) : (
-          recent.map((record) => (
-            <View key={record.id} style={styles.recordRow}>
-              <Pressable
-                style={styles.recordMain}
-                onPress={() => router.push(`/record/${record.id}`)}
-                onLongPress={() => confirmDeleteRecord(record.id)}
-                delayLongPress={450}
-                accessibilityLabel={`记录 ${record.merchant || record.note || '消费'}`}
-                accessibilityHint="轻点查看详情，长按删除"
-                accessibilityActions={[{ name: 'delete', label: '删除记录' }]}
-                onAccessibilityAction={(event) => {
-                  if (event.nativeEvent.actionName === 'delete') confirmDeleteRecord(record.id);
-                }}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={typography.body}>{record.merchant || record.note || '消费'}</Text>
-                  <Text style={typography.caption}>{record.localDate}</Text>
-                </View>
-                <Text style={typography.amount}>¥{formatYuan(record.actualCostMinor)}</Text>
-              </Pressable>
-            </View>
-          ))
-        )}
-      </ScrollView>
+      <LedgerFeed
+        items={feed}
+        header={header}
+        onOpenRecord={openRecord}
+        onDeleteRecord={confirmDeleteRecord}
+        onOpenPending={openPending}
+        onRetryPending={retryPending}
+      />
 
       <Modal visible={filterOpen} animationType="slide" presentationStyle="pageSheet">
         <Screen style={{ paddingTop: insets.top + spacing.sm }}>
@@ -377,7 +398,6 @@ function Segment({
 }
 
 const styles = StyleSheet.create({
-  page: { paddingBottom: spacing.xxl },
   overview: { paddingVertical: spacing.xl },
   total: { fontSize: 34, fontWeight: '700', color: colors.accent, marginVertical: spacing.xs },
   analysisRow: { flexDirection: 'row', gap: spacing.sm },
@@ -404,19 +424,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sectionTitle: { ...typography.secondary, marginTop: spacing.lg, marginBottom: spacing.sm },
-  recordRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.divider,
-  },
-  recordMain: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   filterPage: { paddingBottom: 110 },
   segment: { flexDirection: 'row', gap: spacing.sm },

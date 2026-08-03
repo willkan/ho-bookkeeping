@@ -282,13 +282,29 @@ export class SettingsJobsRepository {
     );
   }
 
-  listRawInputsForDate(localDate: string): RawInput[] {
+  listUnresolvedRawInputs(): RawInput[] {
     return this.db
       .all<RawInputRow>(
         `SELECT * FROM raw_inputs
-       WHERE local_date = ? AND deleted_at IS NULL
-       ORDER BY submitted_at DESC`,
-        [localDate],
+       WHERE lifecycle_status IN ('pending_parse', 'pending_confirm', 'parse_failed')
+         AND deleted_at IS NULL
+       ORDER BY submitted_at DESC, id DESC`,
+      )
+      .map(mapRawInput);
+  }
+
+  listWithdrawnRawInputs(): RawInput[] {
+    return this.db
+      .all<RawInputRow>(
+        `SELECT raw_inputs.* FROM raw_inputs
+       WHERE raw_inputs.lifecycle_status = 'posted'
+         AND raw_inputs.deleted_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM consumption_records
+           WHERE consumption_records.raw_input_id = raw_inputs.id
+             AND consumption_records.deleted_at IS NULL
+         )
+       ORDER BY raw_inputs.submitted_at DESC, raw_inputs.id DESC`,
       )
       .map(mapRawInput);
   }

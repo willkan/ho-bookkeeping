@@ -5,7 +5,7 @@ import { z } from 'zod';
  * Built on device; provider output is validated against this shape locally.
  * Not a domain entity, SQLite row, or deployment gateway DTO.
  */
-export const CONTRACT_VERSION = '2.0.0' as const;
+export const CONTRACT_VERSION = '2.1.0' as const;
 
 export const TagTypeSchema = z.enum([
   'category',
@@ -22,6 +22,32 @@ export type TagType = z.infer<typeof TagTypeSchema>;
 /** Integer minor units only — never floating point money on the wire. */
 export const MoneyMinorSchema = z.number().int();
 
+const localDateFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function localDateForInstant(instant: string, timezone: string): string | null {
+  const date = new Date(instant);
+  if (Number.isNaN(date.getTime())) return null;
+  try {
+    let formatter = localDateFormatters.get(timezone);
+    if (!formatter) {
+      formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+      localDateFormatters.set(timezone, formatter);
+    }
+    const parts = formatter.formatToParts(date);
+    const year = parts.find((part) => part.type === 'year')?.value;
+    const month = parts.find((part) => part.type === 'month')?.value;
+    const day = parts.find((part) => part.type === 'day')?.value;
+    return year && month && day ? `${year}-${month}-${day}` : null;
+  } catch {
+    return null;
+  }
+}
+
 export const CandidateTagSchema = z.object({
   name: z.string().min(1).max(64),
   type: TagTypeSchema,
@@ -30,24 +56,43 @@ export const CandidateTagSchema = z.object({
 });
 export type CandidateTag = z.infer<typeof CandidateTagSchema>;
 
-export const CandidateRecordSchema = z.object({
-  direction: z.enum(['expense', 'income', 'transfer']),
-  merchant: z.string().max(200).nullable(),
-  note: z.string().max(500).nullable(),
-  /** ISO-8601 instant when the consumption occurred. */
-  occurred_at: z.string().min(1),
-  timezone: z.string().min(1),
-  /** Local calendar date YYYY-MM-DD for user-facing day grouping. */
-  local_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  currency: z.literal('CNY'),
-  /** 商品原价 */
-  list_price_minor: MoneyMinorSchema.nonnegative(),
-  /** 本次实付 */
-  actual_cost_minor: MoneyMinorSchema.nonnegative(),
-  /** 本次账单明确使用的优惠券抵扣 */
-  discount_minor: MoneyMinorSchema.nonnegative(),
-  tags: z.array(CandidateTagSchema),
-});
+export const CandidateRecordSchema = z
+  .object({
+    direction: z.enum(['expense', 'income', 'transfer']),
+    merchant: z.string().max(200).nullable(),
+    note: z.string().max(500).nullable(),
+    /** ISO-8601 instant when the consumption occurred. */
+    occurred_at: z.string().min(1),
+    timezone: z.string().min(1),
+    /** Local calendar date YYYY-MM-DD for user-facing day grouping. */
+    local_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    currency: z.literal('CNY'),
+    /** 商品原价 */
+    list_price_minor: MoneyMinorSchema.nonnegative(),
+    /** 本次实付 */
+    actual_cost_minor: MoneyMinorSchema.nonnegative(),
+    /** 本次账单明确使用的优惠券抵扣 */
+    discount_minor: MoneyMinorSchema.nonnegative(),
+    tags: z.array(CandidateTagSchema),
+  })
+  .superRefine((record, context) => {
+    const derivedLocalDate = localDateForInstant(record.occurred_at, record.timezone);
+    if (!derivedLocalDate) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['occurred_at'],
+        message: 'occurred_at must be a valid instant in a valid timezone',
+      });
+      return;
+    }
+    if (derivedLocalDate !== record.local_date) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['local_date'],
+        message: 'local_date must match occurred_at in timezone',
+      });
+    }
+  });
 export type CandidateRecord = z.infer<typeof CandidateRecordSchema>;
 
 export const TagCandidateSchema = z.object({

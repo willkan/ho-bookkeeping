@@ -196,6 +196,45 @@ describe('sqlite migrations and repository integration', () => {
     db.close();
   });
 
+  it('invalidates unconfirmed 2.0 proposals and advances unfinished jobs to date contract 2.1', () => {
+    const db = openBetterSqliteDatabase(':memory:');
+    migrateThroughVersion(db, 6);
+    const repo = new LedgerRepository(db, new SequenceIdGenerator());
+    const submitted = repo.submitRawInput({
+      id: 'raw-old-date-contract',
+      rawText: '昨天买菜30元',
+      submittedAt: '2026-07-16T04:00:00.000Z',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-07-16',
+      confirmMode: 'confirm_before_post',
+      modeIdSnapshot: null,
+      modeNameSnapshot: null,
+      defaultTagsSnapshot: [],
+      includeInModeStats: false,
+      jobId: 'job-old-date-contract',
+      clientRequestId: 'req-old-date-contract',
+    });
+    db.run(
+      `UPDATE raw_inputs
+       SET lifecycle_status = 'pending_confirm', candidates_json = '[]'
+       WHERE id = ?`,
+      [submitted.rawInput.id],
+    );
+    db.run(`UPDATE parse_jobs SET status = 'succeeded', contract_version = '2.0.0' WHERE id = ?`, [
+      submitted.job.id,
+    ]);
+
+    migrate(db);
+
+    expect(repo.getRawInput(submitted.rawInput.id)).toMatchObject({
+      lifecycleStatus: 'parse_failed',
+      candidatesJson: null,
+      parseErrorCategory: 'unsupported_contract_version',
+    });
+    expect(repo.getParseJob(submitted.job.id)?.contractVersion).toBe('2.1.0');
+    db.close();
+  });
+
   // Positive: migrations apply on empty database
   it('applies forward migrations and seeds defaults', () => {
     const db = openBetterSqliteDatabase(':memory:');
@@ -204,7 +243,7 @@ describe('sqlite migrations and repository integration', () => {
     const version = db.get<{ version: number }>(
       'SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1',
     );
-    expect(version?.version).toBe(6);
+    expect(version?.version).toBe(7);
     const settings = new LedgerRepository(db, new SequenceIdGenerator()).getSettings();
     expect(settings.confirmMode).toBe('auto_post');
     db.close();

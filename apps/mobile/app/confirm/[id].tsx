@@ -247,7 +247,7 @@ export default function ConfirmScreen() {
                 const candidates = buildCandidates();
                 void service.confirmPending(raw.id, candidates).then(async () => {
                   await refresh();
-                  router.replace('/today');
+                  router.replace('/ledger');
                 });
               } catch (error) {
                 Alert.alert('无法确认', error instanceof Error ? error.message : '请检查填写内容');

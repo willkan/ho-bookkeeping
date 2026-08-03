@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -32,8 +32,8 @@ describe('UI product-copy guards', () => {
   });
 
   it('ledger rows prefer the meaningful note when the merchant is empty', () => {
-    const src = readFileSync(join(APP_ROOT, 'app/today.tsx'), 'utf8');
-    expect(src).toContain("const title = r.merchant || r.note || '未命名记录'");
+    const src = readFileSync(join(APP_ROOT, 'src/ui/ledger-feed.tsx'), 'utf8');
+    expect(src).toContain("const title = record.merchant || record.note || '消费'");
     expect(src).toContain('accessibilityLabel={`记录 ${title}`}');
   });
 
@@ -97,18 +97,24 @@ describe('UI product-copy guards', () => {
     expect(src).not.toContain('expense|income|transfer');
   });
 
-  it('ledger and today rows expose confirmed long-press deletion without a persistent icon', () => {
-    const ledger = readFileSync(join(APP_ROOT, 'app/(tabs)/ledger.tsx'), 'utf8');
-    const today = readFileSync(join(APP_ROOT, 'app/today.tsx'), 'utf8');
-    for (const src of [ledger, today]) {
-      expect(src).toContain('onLongPress');
-      expect(src).toContain("name: 'delete', label: '删除记录'");
-      expect(src).not.toContain('name="trash-outline"');
-      expect(src).not.toContain('name="ellipsis-horizontal"');
-      expect(src).toContain("Alert.alert('删除这条记录？'");
-      expect(src).toContain("text: '删除记录'");
-      expect(src).toContain('service.softDeleteConsumption');
-    }
+  it('ledger exposes confirmed long-press deletion without a persistent icon', () => {
+    const route = readFileSync(join(APP_ROOT, 'app/(tabs)/ledger.tsx'), 'utf8');
+    const feed = readFileSync(join(APP_ROOT, 'src/ui/ledger-feed.tsx'), 'utf8');
+    expect(feed).toContain('onLongPress');
+    expect(feed).toContain("name: 'delete', label: '删除记录'");
+    expect(feed).not.toContain('name="trash-outline"');
+    expect(feed).not.toContain('name="ellipsis-horizontal"');
+    expect(route).toContain("Alert.alert('删除这条记录？'");
+    expect(route).toContain("text: '删除记录'");
+    expect(route).toContain('service.softDeleteConsumption');
+  });
+
+  it('uses one global ledger route instead of a separate today ledger', () => {
+    const tabs = readFileSync(join(APP_ROOT, 'app/(tabs)/_layout.tsx'), 'utf8');
+    const recordHome = readFileSync(join(APP_ROOT, 'app/(tabs)/index.tsx'), 'utf8');
+    expect(tabs).toContain("title: '账单'");
+    expect(recordHome).toContain("router.push('/ledger')");
+    expect(existsSync(join(APP_ROOT, 'app/today.tsx'))).toBe(false);
   });
 
   it('tag management exposes merge-safe deletion rather than hiding a hard delete', () => {

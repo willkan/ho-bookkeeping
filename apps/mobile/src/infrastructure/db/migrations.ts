@@ -318,6 +318,28 @@ ALTER TABLE consumption_records DROP COLUMN payment_parts_json;
 ALTER TABLE consumption_records DROP COLUMN is_coupon_purchase;
 `,
   },
+  {
+    version: 7,
+    sql: `
+-- Contract 2.1 makes occurred_at/timezone/local_date one consistent event-time fact.
+-- Unconfirmed 2.0 proposals cannot be trusted under the stricter date semantics.
+UPDATE parse_jobs
+SET contract_version = '2.1.0',
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE status != 'succeeded'
+   OR raw_input_id IN (
+     SELECT id FROM raw_inputs WHERE lifecycle_status = 'pending_confirm'
+   );
+
+UPDATE raw_inputs
+SET lifecycle_status = 'parse_failed',
+    candidates_json = NULL,
+    parse_error_category = 'unsupported_contract_version',
+    parse_error_message = '请按新版日期规则重新整理',
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE lifecycle_status = 'pending_confirm';
+`,
+  },
 ];
 
 export function migrate(db: SqliteDatabase): void {

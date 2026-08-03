@@ -40,6 +40,36 @@ const simpleExpense = {
 };
 
 describe('transport contract skeletons and cases', () => {
+  it('accepts an occurred instant whose local calendar date matches its timezone', () => {
+    expect(
+      CandidateRecordSchema.safeParse({
+        ...simpleExpense,
+        occurred_at: '2026-07-15T16:30:00.000Z',
+        timezone: 'Asia/Shanghai',
+        local_date: '2026-07-16',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('rejects an invalid occurred_at instant', () => {
+    expect(
+      CandidateRecordSchema.safeParse({
+        ...simpleExpense,
+        occurred_at: 'yesterday sometime',
+      }).success,
+    ).toBe(false);
+  });
+  it('rejects a local_date that disagrees with occurred_at in the record timezone', () => {
+    expect(
+      CandidateRecordSchema.safeParse({
+        ...simpleExpense,
+        occurred_at: '2026-07-16T16:30:00.000Z',
+        timezone: 'Asia/Shanghai',
+        local_date: '2026-07-16',
+      }).success,
+    ).toBe(false);
+  });
+
   // Positive: valid multi-record parse response
   it('accepts a flat list of three peer consumption candidates', () => {
     const response = {

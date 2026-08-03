@@ -29,7 +29,6 @@ export default function RootLayout() {
           }}
         >
           <Stack.Screen name="(tabs)" options={{ headerShown: false, title: '返回' }} />
-          <Stack.Screen name="today" options={{ title: '今日账' }} />
           <Stack.Screen name="confirm/[id]" options={{ title: '确认这次整理' }} />
           <Stack.Screen name="record/[id]" options={{ title: '记录详情' }} />
           <Stack.Screen name="modes/index" options={{ title: '模式' }} />

@@ -33,6 +33,19 @@ function extractExampleJsonOutput(prompt: string): unknown {
 }
 
 describe('PARSE_SYSTEM_PROMPT for Chat Completions JSON mode', () => {
+  it('anchors relative dates to submitted_at and timezone instead of provider execution time', () => {
+    expect(PARSE_SYSTEM_PROMPT).toMatch(/relative date/i);
+    expect(PARSE_SYSTEM_PROMPT).toMatch(/昨天/);
+    expect(PARSE_SYSTEM_PROMPT).toMatch(/前天/);
+    expect(PARSE_SYSTEM_PROMPT).toMatch(/submitted_at.*timezone/i);
+    expect(PARSE_SYSTEM_PROMPT).toMatch(/never use.*current/i);
+  });
+  it('uses submitted_at only when the note contains no event date or time', () => {
+    expect(PARSE_SYSTEM_PROMPT).toMatch(/no explicit event date or time/i);
+    expect(PARSE_SYSTEM_PROMPT).toMatch(/occurred_at.*submitted_at/i);
+    expect(PARSE_SYSTEM_PROMPT).toMatch(/local_date.*request local_date/i);
+  });
+
   it('treats coupon use as checkout discount without coupon identity or purchase tracking', () => {
     expect(PARSE_SYSTEM_PROMPT).toContain('"actual_cost_minor":30000');
     expect(PARSE_SYSTEM_PROMPT).toContain('"discount_minor":2000');
@@ -121,12 +134,13 @@ describe('PARSE_SYSTEM_PROMPT for Chat Completions JSON mode', () => {
     expect(asSuccess.success).toBe(true);
   });
 
-  // Positive: prompt instructs timezone/local_date copy and submitted_at fallback for occurred_at
-  it('instructs copying request timezone/local_date and using submitted_at when no event time', () => {
+  // Positive: prompt keeps request timezone and derives a consistent occurred/local date pair.
+  it('keeps request timezone and derives local_date from occurred_at', () => {
     expect(PARSE_SYSTEM_PROMPT).toMatch(/timezone/i);
     expect(PARSE_SYSTEM_PROMPT).toMatch(/local_date/i);
     expect(PARSE_SYSTEM_PROMPT).toMatch(/submitted_at/i);
     expect(PARSE_SYSTEM_PROMPT).toMatch(/occurred_at/i);
+    expect(PARSE_SYSTEM_PROMPT).toMatch(/derive local_date/i);
   });
 
   // Positive: example is a simple Chinese expense (not nested groups)

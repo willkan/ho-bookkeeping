@@ -50,7 +50,95 @@ function setup(handler: ConstructorParameters<typeof FakeAiParseTransport>[0]): 
   return { service, db, repo };
 }
 
+function recordsForDate(service: LedgerService, localDate: string) {
+  return service.listLedger().records.filter((record) => record.localDate === localDate);
+}
+
 describe('ledger state machine / tracer bullet', () => {
+  it('lists unresolved inputs first across all submission dates and newest first', async () => {
+    const { service } = setup(() => {
+      throw new Error('not processed');
+    });
+    const older = await service.submitRawInput({
+      rawText: '前天买菜30元',
+      submittedAt: '2026-07-15T10:00:00.000Z',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-07-15',
+    });
+    const newer = await service.submitRawInput({
+      rawText: '昨天打车26元',
+      submittedAt: '2026-07-16T10:00:00.000Z',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-07-16',
+    });
+
+    const pending = service.listLedger().pending;
+
+    expect(pending.map((item) => item.raw.id)).toEqual([newer.rawInput.id, older.rawInput.id]);
+  });
+  it('lists effective records after unresolved inputs by occurred date descending', async () => {
+    const { service } = setup((request) => ({
+      contract_version: CONTRACT_VERSION,
+      request_id: request.request_id,
+      status: 'ok',
+      records: [
+        request.raw_text.includes('昨天')
+          ? expense('昨天的店', 20, {
+              occurred_at: '2026-07-15T10:00:00.000Z',
+              local_date: '2026-07-15',
+            })
+          : expense('前天的店', 10, {
+              occurred_at: '2026-07-14T10:00:00.000Z',
+              local_date: '2026-07-14',
+            }),
+      ],
+    }));
+    const older = await service.submitRawInput({
+      rawText: '前天消费10元',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-07-16',
+    });
+    const newer = await service.submitRawInput({
+      rawText: '昨天消费20元',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-07-16',
+    });
+    await service.processJob(older.job.id);
+    await service.processJob(newer.job.id);
+    await service.submitRawInput({
+      rawText: '今天还在解析',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-07-16',
+    });
+
+    const ledger = service.listLedger();
+
+    expect(ledger.pending).toHaveLength(1);
+    expect(ledger.records.map((record) => record.merchant)).toEqual(['昨天的店', '前天的店']);
+  });
+  it('projects an all-withdrawn input outside the pending count', async () => {
+    const { service } = setup((request) => ({
+      contract_version: CONTRACT_VERSION,
+      request_id: request.request_id,
+      status: 'ok',
+      records: [expense('已撤销的店', 25)],
+    }));
+    await service.submitRawInput({
+      rawText: '午饭花了25元',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-07-16',
+    });
+    await service.processEligibleJobs();
+    const record = service.listLedger().records[0]!;
+
+    service.softDeleteConsumption(record.id);
+    const ledger = service.listLedger();
+
+    expect(ledger.pending).toHaveLength(0);
+    expect(ledger.records).toHaveLength(0);
+    expect(ledger.withdrawn.map((raw) => raw.rawText)).toEqual(['午饭花了25元']);
+  });
+
   it('classifies an AI-created category tag in the consumption breakdown immediately', async () => {
     const { service } = setup((request) => ({
       contract_version: CONTRACT_VERSION,
@@ -118,7 +206,7 @@ describe('ledger state machine / tracer bullet', () => {
       localDate: '2026-07-16',
     });
     await service.processEligibleJobs();
-    expect(service.listToday('2026-07-16').records.map((record) => record.merchant)).toEqual([
+    expect(recordsForDate(service, '2026-07-16').map((record) => record.merchant)).toEqual([
       'XX',
       'YY',
       'ZZ',
@@ -138,9 +226,8 @@ describe('ledger state machine / tracer bullet', () => {
       localDate: '2026-07-16',
     });
     await service.processEligibleJobs();
-    service.softDeleteConsumption(service.listToday('2026-07-16').records[0]!.id);
-    const rawItem = service.listTodayTimeline('2026-07-16').find((item) => item.kind === 'raw');
-    expect(rawItem?.kind === 'raw' ? rawItem.viewStatus : null).toBe('withdrawn');
+    service.softDeleteConsumption(recordsForDate(service, '2026-07-16')[0]!.id);
+    expect(service.listLedger().withdrawn[0]?.lifecycleStatus).toBe('posted');
   });
 
   it('lets a user correct an existing tag name and semantic type', () => {
@@ -197,9 +284,10 @@ describe('ledger state machine / tracer bullet', () => {
     });
     await service.processEligibleJobs();
 
-    const posted = service.listToday('2026-07-16');
-    expect(posted.rawInputs[0]?.lifecycleStatus).toBe('posted');
-    const records = posted.records.filter((r) => r.rawInputId === rawInput.id);
+    expect(service.getRawInput(rawInput.id)?.lifecycleStatus).toBe('posted');
+    const records = recordsForDate(service, '2026-07-16').filter(
+      (r) => r.rawInputId === rawInput.id,
+    );
     expect(records).toHaveLength(3);
     expect(records.map((r) => r.actualCostMinor).sort((a, b) => a - b)).toEqual([
       2000, 10000, 20000,
@@ -239,7 +327,7 @@ describe('ledger state machine / tracer bullet', () => {
       ids2,
     );
     await service2.processEligibleJobs();
-    expect(service2.listToday('2026-07-16').records).toHaveLength(1);
+    expect(recordsForDate(service2, '2026-07-16')).toHaveLength(1);
     expect(calls).toBe(0); // first service never ran
   });
 
@@ -267,7 +355,32 @@ describe('ledger state machine / tracer bullet', () => {
 
     const raw = service.getRawInput(rawInput.id);
     expect(raw?.lifecycleStatus).toBe('parse_failed');
-    expect(service.listToday('2026-07-16').records).toHaveLength(0);
+    expect(recordsForDate(service, '2026-07-16')).toHaveLength(0);
+  });
+
+  it('rejects a candidate whose occurred instant disagrees with its local date', async () => {
+    const { service } = setup((request) => ({
+      contract_version: CONTRACT_VERSION,
+      request_id: request.request_id,
+      status: 'ok',
+      records: [
+        expense('跨日错误', 10, {
+          occurred_at: '2026-07-16T16:30:00.000Z',
+          timezone: 'Asia/Shanghai',
+          local_date: '2026-07-16',
+        }),
+      ],
+    }));
+    const { rawInput } = await service.submitRawInput({
+      rawText: '昨天消费10元',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-07-16',
+    });
+
+    await service.processEligibleJobs();
+
+    expect(service.getRawInput(rawInput.id)?.lifecycleStatus).toBe('parse_failed');
+    expect(service.listLedger().records).toHaveLength(0);
   });
 
   // Negative: late response with wrong request_id cannot attach
@@ -286,7 +399,7 @@ describe('ledger state machine / tracer bullet', () => {
     });
     await service.processEligibleJobs();
     expect(service.getRawInput(rawInput.id)?.lifecycleStatus).toBe('parse_failed');
-    expect(service.listToday('2026-07-16').records).toHaveLength(0);
+    expect(recordsForDate(service, '2026-07-16')).toHaveLength(0);
   });
 
   // Positive: confirm-before-post does not auto-post
@@ -305,9 +418,9 @@ describe('ledger state machine / tracer bullet', () => {
     });
     await service.processEligibleJobs();
     expect(service.getRawInput(rawInput.id)?.lifecycleStatus).toBe('pending_confirm');
-    expect(service.listToday('2026-07-16').records).toHaveLength(0);
+    expect(recordsForDate(service, '2026-07-16')).toHaveLength(0);
     await service.confirmPending(rawInput.id);
-    expect(service.listToday('2026-07-16').records).toHaveLength(1);
+    expect(recordsForDate(service, '2026-07-16')).toHaveLength(1);
   });
 
   // Positive: manual edit does not rewrite original text or siblings
@@ -324,9 +437,9 @@ describe('ledger state machine / tracer bullet', () => {
       localDate: '2026-07-16',
     });
     await service.processEligibleJobs();
-    const records = service
-      .listToday('2026-07-16')
-      .records.filter((r) => r.rawInputId === rawInput.id);
+    const records = recordsForDate(service, '2026-07-16').filter(
+      (r) => r.rawInputId === rawInput.id,
+    );
     const xx = records.find((r) => r.merchant === 'XX')!;
     service.editConsumption({
       id: xx.id,
@@ -364,11 +477,11 @@ describe('ledger state machine / tracer bullet', () => {
       localDate: '2026-07-16',
     });
     await service.processEligibleJobs();
-    const id = service.listToday('2026-07-16').records[0]!.id;
+    const id = recordsForDate(service, '2026-07-16')[0]!.id;
     service.softDeleteConsumption(id);
-    expect(service.listToday('2026-07-16').records).toHaveLength(0);
+    expect(recordsForDate(service, '2026-07-16')).toHaveLength(0);
     service.undoSoftDelete(id);
-    expect(service.listToday('2026-07-16').records).toHaveLength(1);
+    expect(recordsForDate(service, '2026-07-16')).toHaveLength(1);
   });
 
   it('posts coupon use as paid amount plus discount without coupon identity', async () => {
@@ -392,7 +505,7 @@ describe('ledger state machine / tracer bullet', () => {
       localDate: '2026-07-12',
     });
     await service.processEligibleJobs();
-    const grocery = service.listToday('2026-07-12').records[0]!;
+    const grocery = recordsForDate(service, '2026-07-12')[0]!;
     expect(grocery.actualCostMinor).toBe(30000);
     expect(grocery.listPriceMinor).toBe(32000);
     expect(grocery.discountMinor).toBe(2000);
@@ -459,7 +572,7 @@ describe('ledger state machine / tracer bullet', () => {
       localDate: '2026-07-16',
     });
     await service.processEligibleJobs();
-    expect(service.listToday('2026-07-16').records).toHaveLength(3);
+    expect(recordsForDate(service, '2026-07-16')).toHaveLength(3);
     const done = repo.getParseJob(job.id);
     expect(done?.status).toBe('succeeded');
     expect(done?.providerHost).toBe('api.deepseek.com');
@@ -516,7 +629,7 @@ describe('ledger state machine / tracer bullet', () => {
       localDate: '2026-07-16',
     });
     await service.processEligibleJobs();
-    expect(service.listToday('2026-07-16').records.map((r) => r.merchant)).toEqual(['AA']);
+    expect(recordsForDate(service, '2026-07-16').map((r) => r.merchant)).toEqual(['AA']);
 
     // Submit second while holding config change before processing
     const second = await service.submitRawInput({
@@ -531,9 +644,8 @@ describe('ledger state machine / tracer bullet', () => {
       keepExistingKey: false,
     });
     await service.processEligibleJobs();
-    const merchants = service
-      .listToday('2026-07-16')
-      .records.map((r) => r.merchant)
+    const merchants = recordsForDate(service, '2026-07-16')
+      .map((r) => r.merchant)
       .sort();
     expect(merchants).toEqual(['AA', 'BB']);
     const job2 = repo.getParseJob(second.job.id);
@@ -566,7 +678,7 @@ describe('ledger state machine / tracer bullet', () => {
     ]);
     expect(repo.getParseJob(job.id)?.status).toBe('running');
     await service.processEligibleJobs('2026-07-16T10:05:00.000Z');
-    expect(service.listToday('2026-07-16').records).toHaveLength(1);
+    expect(recordsForDate(service, '2026-07-16')).toHaveLength(1);
   });
 
   // Positive: mode default tags snapshot on submit
@@ -590,9 +702,7 @@ describe('ledger state machine / tracer bullet', () => {
       localDate: '2026-07-16',
     });
     await service.processEligibleJobs();
-    const record = service
-      .listToday('2026-07-16')
-      .records.find((r) => r.rawInputId === rawInput.id)!;
+    const record = recordsForDate(service, '2026-07-16').find((r) => r.rawInputId === rawInput.id)!;
     expect(record.tags.map((t) => t.tagId).sort()).toEqual([place.id, trip.id].sort());
     expect(record.includeInModeStats).toBe(true);
   });

@@ -32,7 +32,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="ledger"
         options={{
-          title: '看账本',
+          title: '账单',
           tabBarIcon: ({ focused }) => <TabIcon glyph="☰" focused={focused} />,
         }}
       />

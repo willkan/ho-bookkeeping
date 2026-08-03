@@ -40,13 +40,16 @@ export type SubmitRawInputCommand = {
   confirmModeOverride?: ConfirmMode;
 };
 
-export type TodayTimelineItem =
-  | { kind: 'record'; record: ConsumptionRecord }
-  | {
-      kind: 'raw';
-      raw: RawInput;
-      viewStatus: 'pending_parse' | 'pending_confirm' | 'parse_failed' | 'withdrawn';
-    };
+export type LedgerPendingItem = {
+  raw: RawInput;
+  viewStatus: 'pending_parse' | 'pending_confirm' | 'parse_failed';
+};
+
+export type LedgerProjection = {
+  pending: LedgerPendingItem[];
+  withdrawn: RawInput[];
+  records: ConsumptionRecord[];
+};
 
 function jobMetaFrom(meta: ParseExecutionMeta | null): {
   modelVersion: string | null;
@@ -207,7 +210,7 @@ export class LedgerService {
       return;
     }
 
-    const validation = validateCandidateList(response.records);
+    const validation = validateCandidateList(response.records, raw.timezone);
     if (!validation.ok) {
       this.repo.markJobFailed(
         jobId,
@@ -278,7 +281,7 @@ export class LedgerService {
       : raw.candidatesJson
         ? (JSON.parse(raw.candidatesJson) as CandidateRecord[])
         : [];
-    const validation = validateCandidateList(candidates);
+    const validation = validateCandidateList(candidates, raw.timezone);
     if (!validation.ok) {
       throw new Error(validation.issues.map((i) => i.message).join('; '));
     }
@@ -310,32 +313,15 @@ export class LedgerService {
     });
   }
 
-  listToday(localDate: string): {
-    rawInputs: RawInput[];
-    records: ConsumptionRecord[];
-  } {
+  listLedger(): LedgerProjection {
     return {
-      rawInputs: this.repo.listRawInputsForDate(localDate),
-      records: this.repo.listConsumptionForLocalDate(localDate),
+      pending: this.repo.listUnresolvedRawInputs().map((raw) => ({
+        raw,
+        viewStatus: raw.lifecycleStatus as LedgerPendingItem['viewStatus'],
+      })),
+      withdrawn: this.repo.listWithdrawnRawInputs(),
+      records: this.repo.listEffectiveConsumptionRecords(),
     };
-  }
-
-  listTodayTimeline(localDate: string): TodayTimelineItem[] {
-    const { rawInputs, records } = this.listToday(localDate);
-    const activeRawIds = new Set(records.map((record) => record.rawInputId));
-    return [
-      ...records.map((record) => ({ kind: 'record' as const, record })),
-      ...rawInputs.flatMap((raw): TodayTimelineItem[] => {
-        if (raw.lifecycleStatus === 'posted' && activeRawIds.has(raw.id)) return [];
-        return [
-          {
-            kind: 'raw',
-            raw,
-            viewStatus: raw.lifecycleStatus === 'posted' ? 'withdrawn' : raw.lifecycleStatus,
-          },
-        ];
-      }),
-    ];
   }
 
   getConsumption(id: string): ConsumptionRecord | undefined {

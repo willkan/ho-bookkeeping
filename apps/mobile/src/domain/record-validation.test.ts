@@ -41,6 +41,18 @@ describe('record amount validation', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('rejects a record whose occurrence instant does not match its local date', () => {
+    const result = validateCandidateList([
+      expense({ occurred_at: '2026-07-15T10:18:00.000Z', local_date: '2026-07-16' }),
+    ]);
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects a record that changes the raw input timezone', () => {
+    const result = validateCandidateList([expense({ timezone: 'UTC' })], 'Asia/Shanghai');
+    expect(result.ok).toBe(false);
+  });
+
   it('applies the same amount relation to manual edits', () => {
     expect(validateAmountsForEdit(30000, 28000, 2000)).toEqual({ ok: true });
     expect(validateAmountsForEdit(30000, 29000, 2000).ok).toBe(false);
