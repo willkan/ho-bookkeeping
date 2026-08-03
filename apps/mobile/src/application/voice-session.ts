@@ -162,7 +162,6 @@ export class VoiceSessionController {
   async dispose(): Promise<void> {
     if (this.disposed) return;
     await this.cleanup();
-    await this.ignoreCleanupError(() => this.speech.dispose());
     this.listeners.clear();
     this.disposed = true;
   }

@@ -111,4 +111,22 @@ describe('app source contract guards', () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  it('owns one prewarmed speech runtime above routes instead of constructing it in screens', () => {
+    const root = readFileSync(join(APP_ROOT, 'app/_layout.tsx'), 'utf8');
+    const record = readFileSync(join(APP_ROOT, 'app/(tabs)/index.tsx'), 'utf8');
+    const settings = readFileSync(join(APP_ROOT, 'app/(tabs)/settings.tsx'), 'utf8');
+    const runtime = readFileSync(
+      join(APP_ROOT, 'src/application/speech-runtime-context.tsx'),
+      'utf8',
+    );
+
+    expect(root).toContain('<SpeechRuntimeProvider>');
+    expect(record).toContain('useSpeechRuntime()');
+    expect(settings).toContain('useSpeechRuntime()');
+    expect(record).not.toContain('new SherpaStreamingSpeech');
+    expect(settings).not.toContain('new SpeechModelManager');
+    expect(runtime).toContain('InteractionManager.runAfterInteractions');
+    expect(runtime).toContain('speech.prepare()');
+  });
 });

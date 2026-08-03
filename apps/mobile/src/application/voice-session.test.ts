@@ -110,6 +110,17 @@ describe('streaming voice input contract cases', () => {
     expect(session.getState().partialText).toBe('');
   });
 
+  it('releases only the page recording session without disposing the app recognizer', async () => {
+    const speech = new FakeStreamingSpeech();
+    const session = new VoiceSessionController(speech);
+    await session.pressMic();
+
+    await session.dispose();
+
+    expect(speech.cancelCallCount).toBe(1);
+    expect(speech.disposeCallCount).toBe(0);
+  });
+
   it('preserves typed text across permission denial and stream startup failure', async () => {
     const deniedSpeech = new FakeStreamingSpeech();
     deniedSpeech.permissionGranted = false;

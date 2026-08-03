@@ -15,10 +15,15 @@ export class FakeStreamingSpeech implements StreamingSpeechPort {
   stopCallCount = 0;
   cancelCallCount = 0;
   disposeCallCount = 0;
+  prepareCallCount = 0;
   observer: StreamingSpeechObserver | null = null;
 
   isAvailable(): boolean {
     return this.available;
+  }
+
+  async prepare(): Promise<void> {
+    this.prepareCallCount += 1;
   }
 
   async getPermissions(): Promise<VoicePermissionResult> {

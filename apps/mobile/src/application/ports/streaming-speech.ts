@@ -34,6 +34,8 @@ export type StreamingSpeechObserver = {
  */
 export interface StreamingSpeechPort {
   isAvailable(): boolean;
+  /** Loads the local recognizer without requesting permission or opening the microphone. */
+  prepare(): Promise<void>;
   getPermissions(): Promise<VoicePermissionResult>;
   requestPermissions(): Promise<VoicePermissionResult>;
   start(observer: StreamingSpeechObserver): Promise<void>;

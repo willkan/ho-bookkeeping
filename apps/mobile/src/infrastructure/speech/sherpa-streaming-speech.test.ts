@@ -113,6 +113,41 @@ function readyModelManager(): SpeechModelManager {
 describe('SherpaStreamingSpeech SenseVoice + VAD boundary', () => {
   beforeEach(() => native.reset());
 
+  it('prepares the recognizer without opening a recording session and reuses it on first start', async () => {
+    const speech = new SherpaStreamingSpeech(readyModelManager());
+
+    await speech.prepare();
+
+    expect(native.createSTT).toHaveBeenCalledTimes(1);
+    expect(native.createVoiceActivityDetector).not.toHaveBeenCalled();
+    expect(native.createPcmLiveStream).not.toHaveBeenCalled();
+
+    await speech.start({ onPartial: vi.fn(), onError: vi.fn() });
+
+    expect(native.createSTT).toHaveBeenCalledTimes(1);
+    expect(native.createVoiceActivityDetector).toHaveBeenCalledTimes(1);
+    expect(native.createPcmLiveStream).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares one recognizer load when preparation and first start overlap', async () => {
+    const speech = new SherpaStreamingSpeech(readyModelManager());
+    let finishLoading!: () => void;
+    native.createSTT.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishLoading = () => resolve(native.engine);
+        }),
+    );
+
+    const preparation = speech.prepare();
+    const starting = speech.start({ onPartial: vi.fn(), onError: vi.fn() });
+    await vi.waitFor(() => expect(native.createSTT).toHaveBeenCalledTimes(1));
+    finishLoading();
+    await Promise.all([preparation, starting]);
+
+    expect(native.createSTT).toHaveBeenCalledTimes(1);
+  });
+
   it('recognizes completed VAD segments serially and flushes the tail only on stop', async () => {
     const speech = new SherpaStreamingSpeech(readyModelManager());
     const partials: string[] = [];

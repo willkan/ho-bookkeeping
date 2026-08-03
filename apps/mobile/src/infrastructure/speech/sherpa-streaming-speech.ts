@@ -49,6 +49,7 @@ function joinSegments(segments: readonly string[]): string {
 
 export class SherpaStreamingSpeech implements StreamingSpeechPort {
   private engine: SttEngine | null = null;
+  private engineLoad: Promise<SttEngine> | null = null;
   private active: ActiveSession | null = null;
   private generation = 0;
 
@@ -56,6 +57,11 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
 
   isAvailable(): boolean {
     return true;
+  }
+
+  async prepare(): Promise<void> {
+    const modelPath = await this.requireModelPath();
+    await this.getOrCreateEngine(modelPath);
   }
 
   async getPermissions(): Promise<{ granted: boolean }> {
@@ -212,8 +218,11 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
 
   async dispose(): Promise<void> {
     await this.cancel();
+    const loading = this.engineLoad;
+    if (loading) await this.ignoreError(async () => void (await loading));
     const engine = this.engine;
     this.engine = null;
+    this.engineLoad = null;
     if (engine) await this.ignoreError(() => engine.destroy());
   }
 
@@ -225,35 +234,44 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
 
   private async getOrCreateEngine(modelPath: string): Promise<SttEngine> {
     if (this.engine) return this.engine;
-    try {
-      this.engine = await createSTT({
-        modelPath: {
-          type: 'file',
-          path: `${modelPath}/${SPEECH_MODEL_RUNTIME_DIRS.asr}`,
+    if (this.engineLoad) return this.engineLoad;
+
+    const loading = createSTT({
+      modelPath: {
+        type: 'file',
+        path: `${modelPath}/${SPEECH_MODEL_RUNTIME_DIRS.asr}`,
+      },
+      preferInt8: true,
+      modelType: 'sense_voice',
+      numThreads: 2,
+      provider: 'cpu',
+      dither: 0,
+      debug: false,
+      modelOptions: {
+        senseVoice: {
+          language: 'auto',
+          useItn: true,
         },
-        preferInt8: true,
-        modelType: 'sense_voice',
-        numThreads: 2,
-        provider: 'cpu',
-        dither: 0,
-        debug: false,
-        modelOptions: {
-          senseVoice: {
-            language: 'auto',
-            useItn: true,
-          },
-        },
+      },
+    })
+      .then((engine) => {
+        this.engine = engine;
+        logger.info('engine_loaded', { model: 'sense_voice_2024_07_17_int8' });
+        return engine;
+      })
+      .catch((error: unknown) => {
+        logger.error('engine_load_failed', {
+          diagnostic: sanitizeDiagnosticMessage(
+            error instanceof Error ? error.message : String(error),
+          ),
+        });
+        throw new StreamingSpeechError('model-load-failed');
+      })
+      .finally(() => {
+        if (this.engineLoad === loading) this.engineLoad = null;
       });
-      logger.info('engine_loaded', { model: 'sense_voice_2024_07_17_int8' });
-      return this.engine;
-    } catch (error) {
-      logger.error('engine_load_failed', {
-        diagnostic: sanitizeDiagnosticMessage(
-          error instanceof Error ? error.message : String(error),
-        ),
-      });
-      throw new StreamingSpeechError('model-load-failed');
-    }
+    this.engineLoad = loading;
+    return loading;
   }
 
   private async recognizeSegments(

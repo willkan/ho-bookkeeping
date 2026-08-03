@@ -4,10 +4,8 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../src/application/app-context';
-import { SpeechModelManager } from '../../src/application/speech-model-manager';
-import { useSpeechModel } from '../../src/application/use-speech-model';
+import { useSpeechRuntime } from '../../src/application/speech-runtime-context';
 import type { ConfirmMode } from '../../src/domain/types';
-import { SenseVoiceVadModelArtifacts } from '../../src/infrastructure/speech/sense-voice-vad-model-artifacts';
 import { LoadingBlock, Screen, SectionLabel } from '../../src/ui/primitives';
 import { colors, spacing, typography } from '../../src/ui/tokens';
 
@@ -20,10 +18,7 @@ export default function SettingsScreen() {
     return service?.getSettings();
   }, [service, tick]);
   const [mode, setMode] = useState<ConfirmMode | undefined>(settings?.confirmMode);
-  const [speechModelManager] = useState(
-    () => new SpeechModelManager(new SenseVoiceVadModelArtifacts()),
-  );
-  const speechModel = useSpeechModel(speechModelManager);
+  const { speechModel, deleteSpeechModel } = useSpeechRuntime();
   const refreshSpeechModel = speechModel.refresh;
 
   useFocusEffect(
@@ -102,7 +97,7 @@ export default function SettingsScreen() {
                 {
                   text: '删除',
                   style: 'destructive',
-                  onPress: () => void speechModel.deleteModel(),
+                  onPress: () => void deleteSpeechModel(),
                 },
               ]);
             }}

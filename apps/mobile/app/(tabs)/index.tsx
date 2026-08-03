@@ -12,12 +12,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../src/application/app-context';
-import { SpeechModelManager } from '../../src/application/speech-model-manager';
-import { useSpeechModel } from '../../src/application/use-speech-model';
+import { useSpeechRuntime } from '../../src/application/speech-runtime-context';
 import { useVoiceSession } from '../../src/application/use-voice-session';
 import type { ModeTagSnapshot } from '../../src/domain/types';
-import { SherpaStreamingSpeech } from '../../src/infrastructure/speech/sherpa-streaming-speech';
-import { SenseVoiceVadModelArtifacts } from '../../src/infrastructure/speech/sense-voice-vad-model-artifacts';
 import {
   Chip,
   EmptyState,
@@ -48,13 +45,9 @@ export default function RecordScreen() {
   const [disabledTagIds, setDisabledTagIds] = useState<Set<string>>(new Set());
   const [screenReaderEnabled, setScreenReaderEnabled] = useState(false);
   const [showSpeechModel, setShowSpeechModel] = useState(false);
-  const [speechModelManager] = useState(
-    () => new SpeechModelManager(new SenseVoiceVadModelArtifacts()),
-  );
-  const speechModel = useSpeechModel(speechModelManager);
+  const { speech, speechModel, speechModelManager } = useSpeechRuntime();
   const refreshSpeechModel = speechModel.refresh;
-  const [streamingSpeech] = useState(() => new SherpaStreamingSpeech(speechModelManager));
-  const voice = useVoiceSession(streamingSpeech);
+  const voice = useVoiceSession(speech);
   const wasCapturingVoice = useRef(false);
 
   useFocusEffect(

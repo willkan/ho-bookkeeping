@@ -94,7 +94,7 @@ UI 只调用应用服务与配置用例，不直接拼 SQL 或散落调用模型
 1. **事实源**：仍为 SQLite 原文与作业行；语音**不**写入账本实体。
 2. **状态机**：`LedgerService` 提交路径不变；语音**不得**绕过「记下来」。
 3. **语音会话**：应用层可测的瞬时状态机（idle / 请求权限 / streaming / finalizing / 可恢复错误）；已完成语段是稳定预览，最终合并文字才写入受控原文。
-4. **采集与识别边界**：`StreamingSpeechPort` + `SherpaStreamingSpeech`；一个端口拥有麦克风 PCM、Silero VAD、SenseVoice、订阅和取消的共同生命周期。原生模块 import **仅**在 `src/infrastructure/speech/`；`modules/sherpa-vad` 是 RN SDK 缺口的原生基础设施桥，不承载应用状态。
+4. **采集与识别边界**：`StreamingSpeechPort` + `SherpaStreamingSpeech`；端口显式区分 App 级 SenseVoice 引擎准备/释放与页面级麦克风 PCM、Silero VAD、订阅和取消会话。原生模块 import **仅**在 `src/infrastructure/speech/`；`modules/sherpa-vad` 是 RN SDK 缺口的原生基础设施桥，不承载应用状态。
 5. **模型边界**：`SpeechModelManagerPort` 管理固定清单、显式来源、下载进度、完整性校验、ready 发布与删除；模型文件不是账本数据。
 6. **Fake**：测试只 fake 流式语音和模型文件传输边界，不 fake `LedgerService` / SQLite。
 
@@ -107,6 +107,7 @@ UI 只调用应用服务与配置用例，不直接拼 SQL 或散落调用模型
 #### 运行合同
 
 - 模拟流式会话：sherpa 原生采集器产生 16 kHz 单声道 PCM；每个音频块串行进入同一个 Silero VAD。VAD 产出的完整语段按顺序交给同一个 SenseVoice offline recognizer，识别期间不并发处理语段，不创建录音文件。
+- App 级语音运行时在模型 ready、App active 且首屏交互完成后异步调用 `StreamingSpeechPort.prepare()`。`prepare()` 只解析 ready 路径并创建 SenseVoice 引擎，不请求权限、不创建 VAD、不打开麦克风；并发的预热与 `start()` 共享同一个 in-flight promise，保证进程内最多加载一份引擎。页面会话 cleanup 只取消当前采集，只有 App 级运行时卸载或模型删除才能 `dispose()` 引擎。
 - 转写：固定模型 `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17` 的 `model.int8.onnx`；`modelType: sense_voice`、自动语言、ITN、greedy search、2 threads、CPU provider。Silero VAD 使用官方 Android 示例默认值：threshold 0.5、minimum silence 0.25 秒、minimum speech 0.25 秒、window 512、maximum speech 5 秒；用户松手时先停止采集，再等待已排队 PCM 完成、调用 VAD `flush()` 并识别尾段。
 - 已完成语段按顺序合并后只投影到瞬时 `partialText`；VAD 分段不能自动结束按住会话或把片段写进正式输入。最终合并结果只在松手后合入受控原文一次。
 - 模型清单固定 SenseVoice revision、官方 Silero VAD、三个文件、字节数、SHA-256 和两个显式来源：国内镜像与 Hugging Face 境外源；小型 VAD 文件使用 sherpa-onnx 官方 GitHub Release。下载到临时目录，逐文件校验，最后写 ready 标记；校验失败不得提供“仍然使用”选项。
