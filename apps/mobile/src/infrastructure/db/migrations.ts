@@ -340,6 +340,21 @@ SET lifecycle_status = 'parse_failed',
 WHERE lifecycle_status = 'pending_confirm';
 `,
   },
+  {
+    version: 8,
+    sql: `
+-- “旅游” is a consumption category. Specific trips use names such as “江西旅游”.
+-- Keep the stable preset ID so historical record and mode references remain intact.
+UPDATE tags
+SET type = 'category',
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = 'preset_trip_travel'
+  AND type = 'trip'
+  AND name = '旅游'
+  AND deleted_at IS NULL
+  AND merged_into_tag_id IS NULL;
+`,
+  },
 ];
 
 export function migrate(db: SqliteDatabase): void {

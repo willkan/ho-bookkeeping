@@ -1,5 +1,6 @@
 import { SequenceIdGenerator } from '../ids/sequence-id-generator';
 import { describe, expect, it } from 'vitest';
+import { computeExclusiveBreakdown } from '../../domain/statistics';
 import { openBetterSqliteDatabase } from './better-sqlite-adapter';
 import { MIGRATIONS, migrate, seedDefaults } from './migrations';
 import { LedgerRepository } from './repositories';
@@ -24,7 +25,7 @@ function migrateThroughVersion(db: SqliteDatabase, targetVersion: number): void 
 }
 
 describe('sqlite migrations and repository integration', () => {
-  it('seeds the common phase-one category catalog and a non-category travel tag', () => {
+  it('seeds the common phase-one category catalog with travel in consumption categories', () => {
     const db = openBetterSqliteDatabase(':memory:');
     migrate(db);
     const repo = new LedgerRepository(db, new SequenceIdGenerator());
@@ -37,6 +38,7 @@ describe('sqlite migrations and repository integration', () => {
         '餐饮',
         '买菜',
         '购物',
+        '旅游',
         '交通',
         '住宿',
         '娱乐',
@@ -50,13 +52,13 @@ describe('sqlite migrations and repository integration', () => {
         '其他',
       ]),
     );
-    const travel = tags.find(({ name, type }) => name === '旅游' && type === 'trip');
+    const travel = tags.find(({ name, type }) => name === '旅游' && type === 'category');
     expect(travel).toBeDefined();
     const categoryGroup = repo.listExclusiveGroups().find(({ name }) => name === '消费类目');
     expect(categoryGroup?.tagIds).toEqual(
       expect.arrayContaining(tags.filter(({ type }) => type === 'category').map(({ id }) => id)),
     );
-    expect(categoryGroup?.tagIds).not.toContain(travel!.id);
+    expect(categoryGroup?.tagIds).toContain(travel!.id);
     db.close();
   });
 
@@ -235,6 +237,71 @@ describe('sqlite migrations and repository integration', () => {
     db.close();
   });
 
+  it('makes historical records using the preset travel tag visible in consumption-category breakdown', () => {
+    const db = openBetterSqliteDatabase(':memory:');
+    migrateThroughVersion(db, 7);
+    const repo = new LedgerRepository(db, new SequenceIdGenerator());
+    const submitted = repo.submitRawInput({
+      id: 'raw-travel-document',
+      rawText: '办理港澳通行证花了43元',
+      submittedAt: '2026-08-03T04:00:00.000Z',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-08-03',
+      confirmMode: 'auto_post',
+      modeIdSnapshot: null,
+      modeNameSnapshot: null,
+      defaultTagsSnapshot: [],
+      includeInModeStats: false,
+      jobId: 'job-travel-document',
+      clientRequestId: 'req-travel-document',
+    });
+    repo.postCandidateList({
+      rawInputId: submitted.rawInput.id,
+      now: '2026-08-03T04:01:00.000Z',
+      lifecycle: 'posted',
+      records: [
+        {
+          direction: 'expense',
+          merchant: '出入境管理局',
+          note: '港澳通行证',
+          occurred_at: '2026-08-03T04:00:00.000Z',
+          timezone: 'Asia/Shanghai',
+          local_date: '2026-08-03',
+          currency: 'CNY',
+          list_price_minor: 4300,
+          actual_cost_minor: 4300,
+          discount_minor: 0,
+          tags: [
+            {
+              name: '旅游',
+              type: 'trip',
+              existing_tag_id: 'preset_trip_travel',
+            },
+          ],
+        },
+      ],
+    });
+
+    migrate(db);
+
+    const tags = repo.listTags();
+    const group = repo.listExclusiveGroups().find(({ name }) => name === '消费类目')!;
+    const result = computeExclusiveBreakdown(
+      repo.listEffectiveConsumptionRecords(),
+      {
+        range: { kind: 'time', startLocalDate: '2026-08-03', endLocalDate: '2026-08-03' },
+        tagIds: [],
+        tagMatch: 'and',
+      },
+      group,
+      new Map(tags.map((tag) => [tag.id, tag])),
+    );
+    expect(tags.find(({ id }) => id === 'preset_trip_travel')?.type).toBe('category');
+    expect(result.buckets.find(({ label }) => label === '旅游')?.amountMinor).toBe(4300);
+    expect(result.buckets.find(({ label }) => label === '未归类')).toBeUndefined();
+    db.close();
+  });
+
   // Positive: migrations apply on empty database
   it('applies forward migrations and seeds defaults', () => {
     const db = openBetterSqliteDatabase(':memory:');
@@ -243,7 +310,7 @@ describe('sqlite migrations and repository integration', () => {
     const version = db.get<{ version: number }>(
       'SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1',
     );
-    expect(version?.version).toBe(7);
+    expect(version?.version).toBe(8);
     const settings = new LedgerRepository(db, new SequenceIdGenerator()).getSettings();
     expect(settings.confirmMode).toBe('auto_post');
     db.close();

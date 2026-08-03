@@ -46,6 +46,12 @@ describe('PARSE_SYSTEM_PROMPT for Chat Completions JSON mode', () => {
     expect(PARSE_SYSTEM_PROMPT).toMatch(/local_date.*request local_date/i);
   });
 
+  it('distinguishes the travel consumption category from a specifically named trip', () => {
+    expect(PARSE_SYSTEM_PROMPT).toMatch(/旅游.*category/i);
+    expect(PARSE_SYSTEM_PROMPT).toMatch(/江西旅游.*trip/i);
+    expect(PARSE_SYSTEM_PROMPT).toMatch(/do not use.*trip.*instead of.*category/i);
+  });
+
   it('treats coupon use as checkout discount without coupon identity or purchase tracking', () => {
     expect(PARSE_SYSTEM_PROMPT).toContain('"actual_cost_minor":30000');
     expect(PARSE_SYSTEM_PROMPT).toContain('"discount_minor":2000');
