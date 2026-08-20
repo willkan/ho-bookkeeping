@@ -20,7 +20,7 @@ const FeedbackResponseSchema = z
   })
   .strict();
 
-type Fetch = typeof fetch;
+type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
 export class ManagedPilotFeedbackClient implements PilotFeedbackPort {
   constructor(

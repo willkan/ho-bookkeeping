@@ -71,7 +71,10 @@ export class ManagedPilotClientError extends Error {
   }
 }
 
-type Fetch = typeof fetch;
+// This adapter only calls fixed HTTPS string URLs. Keeping the injected port
+// narrower than the platform's overloaded global fetch type also makes the
+// boundary stable across DOM and React Native type-library versions.
+type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
 export class ManagedPilotActivationClient {
   constructor(
