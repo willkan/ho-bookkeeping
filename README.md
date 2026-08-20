@@ -1,4 +1,4 @@
-# 清简账本 (bookkeeping)
+# 花哪 (bookkeeping)
 
 Phase-1 local diary-style bookkeeping for iPhone and Android.
 

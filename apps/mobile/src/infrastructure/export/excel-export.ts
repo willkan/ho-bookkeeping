@@ -50,7 +50,7 @@ export async function buildLedgerWorkbook(
 ): Promise<ArrayBuffer> {
   const ExcelJS = await loadExcelJS();
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = '清简账本';
+  workbook.creator = '花哪';
   workbook.created = new Date(options.generatedAt);
   const selected = selectedSet(options);
 

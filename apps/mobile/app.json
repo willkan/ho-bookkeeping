@@ -1,26 +1,39 @@
 {
   "expo": {
-    "name": "清简账本",
-    "slug": "bookkeeping",
-    "version": "0.1.0",
+    "name": "花哪",
+    "slug": "huana",
+    "version": "1.0.0",
     "icon": "./assets/app-icon.png",
     "orientation": "portrait",
-    "scheme": "bookkeeping",
+    "scheme": "huana",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.bookkeeping.app"
+      "bundleIdentifier": "com.willkan.huana",
+      "buildNumber": "1"
     },
     "android": {
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/app-icon.png",
         "backgroundColor": "#F6FAF8"
       },
-      "package": "com.bookkeeping.app"
+      "package": "com.willkan.huana",
+      "versionCode": 1
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store",
+      "./plugins/with-android-release-signing",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": false
+        }
+      ],
       "expo-dev-client",
       "expo-background-task",
       [
