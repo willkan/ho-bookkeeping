@@ -15,6 +15,8 @@ describe('managed pilot GitHub Actions deployment contract', () => {
       expect(workflow).toContain(gate);
     }
     expect(workflow).toContain('platforms: linux/amd64');
+    expect(workflow).toContain('provenance: false');
+    expect(workflow).toContain('sbom: false');
     expect(workflow).toContain(':main-${short_sha}');
     expect(workflow).toContain("push: ${{ github.event_name != 'pull_request' }}");
   });
