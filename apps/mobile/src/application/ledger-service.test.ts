@@ -55,6 +55,146 @@ function recordsForDate(service: LedgerService, localDate: string) {
 }
 
 describe('ledger state machine / tracer bullet', () => {
+  it('keeps withdrawn records out of the normal ledger and lists each one in the archive', async () => {
+    const { service } = setup((request) => ({
+      contract_version: CONTRACT_VERSION,
+      request_id: request.request_id,
+      status: 'ok',
+      records: [expense('XX', 100), expense('YY', 200), expense('ZZ', 20)],
+    }));
+    await service.submitRawInput({
+      rawText: '买xx花了100，买yy花了200，买zz花了20',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-07-16',
+    });
+    await service.processEligibleJobs();
+    const withdrawn = recordsForDate(service, '2026-07-16')[1]!;
+
+    service.softDeleteConsumption(withdrawn.id);
+
+    expect(service.listLedger().records.map((record) => record.merchant)).toEqual(['XX', 'ZZ']);
+    expect(service.listWithdrawnLedger()).toEqual([
+      expect.objectContaining({ id: withdrawn.id, merchant: 'YY' }),
+    ]);
+  });
+
+  it('restores one withdrawn peer record without changing its siblings', async () => {
+    const { service } = setup((request) => ({
+      contract_version: CONTRACT_VERSION,
+      request_id: request.request_id,
+      status: 'ok',
+      records: [expense('XX', 100), expense('YY', 200), expense('ZZ', 20)],
+    }));
+    await service.submitRawInput({
+      rawText: '买xx花了100，买yy花了200，买zz花了20',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-07-16',
+    });
+    await service.processEligibleJobs();
+    const before = recordsForDate(service, '2026-07-16');
+    const withdrawn = before[1]!;
+    service.softDeleteConsumption(withdrawn.id);
+
+    service.restoreConsumption(withdrawn.id);
+
+    expect(service.listWithdrawnLedger()).toHaveLength(0);
+    expect(recordsForDate(service, '2026-07-16')).toEqual(
+      before.map((record) =>
+        record.id === withdrawn.id
+          ? expect.objectContaining({ id: record.id, deletedAt: null })
+          : record,
+      ),
+    );
+  });
+
+  it('finds effective records by merchant, note, raw input, tag name, and tag alias', async () => {
+    const { service, repo } = setup((request) => {
+      if (request.raw_text.includes('耳机')) {
+        return {
+          contract_version: CONTRACT_VERSION,
+          request_id: request.request_id,
+          status: 'ok',
+          records: [expense('淘宝旗舰店', 399, { note: '蓝牙耳机' })],
+        };
+      }
+      if (request.raw_text.includes('周年')) {
+        return {
+          contract_version: CONTRACT_VERSION,
+          request_id: request.request_id,
+          status: 'ok',
+          records: [expense('电商平台', 88, { note: '厨房用品' })],
+        };
+      }
+      return {
+        contract_version: CONTRACT_VERSION,
+        request_id: request.request_id,
+        status: 'ok',
+        records: [
+          expense('电脑城', 299, {
+            note: '机械键盘',
+            tags: [{ name: '数码', type: 'category' }],
+          }),
+        ],
+      };
+    });
+    for (const rawText of ['网购了一副耳机', '周年促销下单', '买了一个键盘']) {
+      const { job } = await service.submitRawInput({
+        rawText,
+        timezone: 'Asia/Shanghai',
+        localDate: '2026-07-16',
+      });
+      await service.processJob(job.id);
+    }
+    const digital = service.listTags().find((tag) => tag.name === '数码')!;
+    repo.setTagAliases(digital.id, ['电子产品'], '2026-07-16T12:00:00.000Z');
+
+    expect(service.searchLedger('淘宝').map((record) => record.merchant)).toEqual(['淘宝旗舰店']);
+    expect(service.searchLedger('蓝牙').map((record) => record.merchant)).toEqual(['淘宝旗舰店']);
+    expect(service.searchLedger('周年').map((record) => record.merchant)).toEqual(['电商平台']);
+    expect(service.searchLedger('数码').map((record) => record.merchant)).toEqual(['电脑城']);
+    expect(service.searchLedger('电子产品').map((record) => record.merchant)).toEqual(['电脑城']);
+    expect(service.searchLedger('   ')).toEqual([]);
+  });
+
+  it('keeps percent and underscore in a ledger keyword literal', async () => {
+    const { service } = setup((request) => ({
+      contract_version: CONTRACT_VERSION,
+      request_id: request.request_id,
+      status: 'ok',
+      records: [expense(request.raw_text.includes('特殊') ? '折扣%_店' : '普通店', 10)],
+    }));
+    for (const rawText of ['买特殊商品', '买普通商品']) {
+      const { job } = await service.submitRawInput({
+        rawText,
+        timezone: 'Asia/Shanghai',
+        localDate: '2026-07-16',
+      });
+      await service.processJob(job.id);
+    }
+
+    expect(service.searchLedger('%_').map((record) => record.merchant)).toEqual(['折扣%_店']);
+  });
+
+  it('excludes soft-deleted records from ledger keyword results', async () => {
+    const { service } = setup((request) => ({
+      contract_version: CONTRACT_VERSION,
+      request_id: request.request_id,
+      status: 'ok',
+      records: [expense('退货店铺', 99)],
+    }));
+    const { job } = await service.submitRawInput({
+      rawText: '买了准备退货的商品',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-07-16',
+    });
+    await service.processJob(job.id);
+    const record = service.searchLedger('退货')[0]!;
+
+    service.softDeleteConsumption(record.id);
+
+    expect(service.searchLedger('退货')).toEqual([]);
+  });
+
   it('lists unresolved inputs first across all submission dates and newest first', async () => {
     const { service } = setup(() => {
       throw new Error('not processed');
@@ -116,29 +256,6 @@ describe('ledger state machine / tracer bullet', () => {
     expect(ledger.pending).toHaveLength(1);
     expect(ledger.records.map((record) => record.merchant)).toEqual(['昨天的店', '前天的店']);
   });
-  it('projects an all-withdrawn input outside the pending count', async () => {
-    const { service } = setup((request) => ({
-      contract_version: CONTRACT_VERSION,
-      request_id: request.request_id,
-      status: 'ok',
-      records: [expense('已撤销的店', 25)],
-    }));
-    await service.submitRawInput({
-      rawText: '午饭花了25元',
-      timezone: 'Asia/Shanghai',
-      localDate: '2026-07-16',
-    });
-    await service.processEligibleJobs();
-    const record = service.listLedger().records[0]!;
-
-    service.softDeleteConsumption(record.id);
-    const ledger = service.listLedger();
-
-    expect(ledger.pending).toHaveLength(0);
-    expect(ledger.records).toHaveLength(0);
-    expect(ledger.withdrawn.map((raw) => raw.rawText)).toEqual(['午饭花了25元']);
-  });
-
   it('classifies an AI-created category tag in the consumption breakdown immediately', async () => {
     const { service } = setup((request) => ({
       contract_version: CONTRACT_VERSION,
@@ -213,30 +330,13 @@ describe('ledger state machine / tracer bullet', () => {
     ]);
   });
 
-  it('projects an all-withdrawn posted input as withdrawn instead of parse_failed', async () => {
-    const { service } = setup((request) => ({
-      contract_version: CONTRACT_VERSION,
-      request_id: request.request_id,
-      status: 'ok',
-      records: [expense('午饭', 25)],
-    }));
-    await service.submitRawInput({
-      rawText: '午饭花了25元',
-      timezone: 'Asia/Shanghai',
-      localDate: '2026-07-16',
-    });
-    await service.processEligibleJobs();
-    service.softDeleteConsumption(recordsForDate(service, '2026-07-16')[0]!.id);
-    expect(service.listLedger().withdrawn[0]?.lifecycleStatus).toBe('posted');
-  });
-
   it('lets a user correct an existing tag name and semantic type', () => {
     const { service } = setup(() => {
       throw new Error('not used');
     });
     const tag = service.createTag('category', '江西旅游');
-    service.updateTagIdentity(tag.id, 'trip', '江西旅游');
-    expect(service.listTags().find((item) => item.id === tag.id)?.type).toBe('trip');
+    service.updateTagIdentity(tag.id, 'other', '江西旅游');
+    expect(service.listTags().find((item) => item.id === tag.id)?.type).toBe('other');
     const category = service.listExclusiveGroups().find((group) => group.name === '消费类目');
     expect(category?.tagIds).not.toContain(tag.id);
   });
@@ -358,6 +458,108 @@ describe('ledger state machine / tracer bullet', () => {
     expect(recordsForDate(service, '2026-07-16')).toHaveLength(0);
   });
 
+  it('keeps a successful empty proposal visible as a recoverable parse failure', async () => {
+    const { service, repo } = setup((request) => ({
+      contract_version: CONTRACT_VERSION,
+      request_id: request.request_id,
+      status: 'ok',
+      records: [],
+    }));
+    const { rawInput, job } = await service.submitRawInput({
+      rawText: '67、购物无印良品。',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-07-16',
+    });
+
+    await service.processEligibleJobs();
+
+    expect(service.getRawInput(rawInput.id)).toMatchObject({
+      lifecycleStatus: 'parse_failed',
+      parseErrorCategory: 'no_records',
+      candidatesJson: '[]',
+    });
+    expect(repo.getParseJob(job.id)?.status).toBe('succeeded');
+    expect(service.listLedger().pending).toEqual([
+      expect.objectContaining({
+        viewStatus: 'parse_failed',
+        raw: expect.objectContaining({ id: rawInput.id }),
+      }),
+    ]);
+    expect(service.listLedger().records).toHaveLength(0);
+  });
+
+  it('soft deletes a failed raw input and terminalizes its parse job', async () => {
+    const { service, repo } = setup((request) => ({
+      contract_version: CONTRACT_VERSION,
+      request_id: request.request_id,
+      status: 'ok',
+      records: [],
+    }));
+    const { rawInput, job } = await service.submitRawInput({
+      rawText: '无法整理的原文',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-07-16',
+      submittedAt: '2026-07-16T10:18:00.000Z',
+    });
+    await service.processJob(job.id, '2026-07-16T10:19:00.000Z');
+
+    service.softDeleteFailedRawInput(rawInput.id);
+
+    expect(service.getRawInput(rawInput.id)?.deletedAt).not.toBeNull();
+    expect(service.listLedger().pending).toHaveLength(0);
+    expect(repo.getParseJob(job.id)).toMatchObject({
+      status: 'failed_terminal',
+      lastErrorCategory: 'user_deleted',
+    });
+  });
+
+  it('does not post a late retry response after the failed raw input is deleted', async () => {
+    let attempt = 0;
+    let releaseRetry!: () => void;
+    const retryCanFinish = new Promise<void>((resolve) => {
+      releaseRetry = resolve;
+    });
+    const { service, repo } = setup(async (request) => {
+      attempt += 1;
+      if (attempt === 1) {
+        return {
+          contract_version: CONTRACT_VERSION,
+          request_id: request.request_id,
+          status: 'error',
+          error_category: 'provider_error',
+          message: 'provider unavailable',
+        };
+      }
+      await retryCanFinish;
+      return {
+        contract_version: CONTRACT_VERSION,
+        request_id: request.request_id,
+        status: 'ok',
+        records: [expense('晚到的记录', 67)],
+      };
+    });
+    const { rawInput, job } = await service.submitRawInput({
+      rawText: '稍后重试的原文',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-07-16',
+      submittedAt: '2026-07-16T10:18:00.000Z',
+    });
+    await service.processJob(job.id, '2026-07-16T10:19:00.000Z');
+    const retry = service.processJob(job.id, '2026-07-16T10:19:02.000Z');
+    await vi.waitFor(() => expect(repo.getParseJob(job.id)?.status).toBe('running'));
+
+    service.softDeleteFailedRawInput(rawInput.id);
+    releaseRetry();
+    await retry;
+
+    expect(service.listLedger()).toMatchObject({ pending: [], records: [] });
+    expect(service.getRawInput(rawInput.id)?.deletedAt).not.toBeNull();
+    expect(repo.getParseJob(job.id)).toMatchObject({
+      status: 'failed_terminal',
+      lastErrorCategory: 'user_deleted',
+    });
+  });
+
   it('rejects a candidate whose occurred instant disagrees with its local date', async () => {
     const { service } = setup((request) => ({
       contract_version: CONTRACT_VERSION,
@@ -423,6 +625,26 @@ describe('ledger state machine / tracer bullet', () => {
     expect(recordsForDate(service, '2026-07-16')).toHaveLength(1);
   });
 
+  it('does not let confirmation replace a non-empty proposal with zero records', async () => {
+    const { service } = setup((request) => ({
+      contract_version: CONTRACT_VERSION,
+      request_id: request.request_id,
+      status: 'ok',
+      records: [expense('XX', 100)],
+    }));
+    service.setConfirmMode('confirm_before_post');
+    const { rawInput } = await service.submitRawInput({
+      rawText: '买xx花了100',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-07-16',
+    });
+    await service.processEligibleJobs();
+
+    await expect(service.confirmPending(rawInput.id, [])).rejects.toThrow(/at least one record/);
+    expect(service.getRawInput(rawInput.id)?.lifecycleStatus).toBe('pending_confirm');
+    expect(recordsForDate(service, '2026-07-16')).toHaveLength(0);
+  });
+
   // Positive: manual edit does not rewrite original text or siblings
   it('manual edit updates one record without changing siblings or original text', async () => {
     const { service } = setup((req) => ({
@@ -480,7 +702,7 @@ describe('ledger state machine / tracer bullet', () => {
     const id = recordsForDate(service, '2026-07-16')[0]!.id;
     service.softDeleteConsumption(id);
     expect(recordsForDate(service, '2026-07-16')).toHaveLength(0);
-    service.undoSoftDelete(id);
+    service.restoreConsumption(id);
     expect(recordsForDate(service, '2026-07-16')).toHaveLength(1);
   });
 
@@ -689,8 +911,8 @@ describe('ledger state machine / tracer bullet', () => {
       status: 'ok',
       records: [expense('午饭', 100)],
     }));
-    const trip = service.createTag('trip', '江西旅游');
-    const place = service.createTag('place', '景德镇');
+    const trip = service.createTag('other', '江西旅游');
+    const place = service.createTag('other', '景德镇');
     const mode = service.saveMode({
       name: '江西旅游',
       defaultTagIds: [trip.id, place.id],
@@ -723,7 +945,7 @@ describe('ledger state machine / tracer bullet', () => {
     const { service } = setup(() => {
       throw new Error('AI is not used');
     });
-    const tag = service.createTag('trip', '江西旅游');
+    const tag = service.createTag('other', '江西旅游');
     service.saveMode({ name: '旅行', defaultTagIds: [tag.id] });
     expect(() => service.deleteTag(tag.id)).toThrow(/先合并标签或移除模式引用/);
     expect(service.listTags().some((item) => item.id === tag.id)).toBe(true);

@@ -129,8 +129,9 @@ describe('SherpaStreamingSpeech SenseVoice + VAD boundary', () => {
     expect(native.createPcmLiveStream).toHaveBeenCalledTimes(1);
   });
 
-  it('shares one recognizer load when preparation and first start overlap', async () => {
+  it('starts capture while the shared recognizer load continues and preserves early speech', async () => {
     const speech = new SherpaStreamingSpeech(readyModelManager());
+    const partials: string[] = [];
     let finishLoading!: () => void;
     native.createSTT.mockImplementationOnce(
       () =>
@@ -140,10 +141,19 @@ describe('SherpaStreamingSpeech SenseVoice + VAD boundary', () => {
     );
 
     const preparation = speech.prepare();
-    const starting = speech.start({ onPartial: vi.fn(), onError: vi.fn() });
+    native.queueVadResult([{ start: 0, samples: [1] }]);
+    const starting = speech.start({
+      onPartial: (text) => partials.push(text),
+      onError: vi.fn(),
+    });
     await vi.waitFor(() => expect(native.createSTT).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(native.mic.start).toHaveBeenCalledTimes(1));
+    await starting;
+    native.emitData([0.1]);
+
     finishLoading();
-    await Promise.all([preparation, starting]);
+    await preparation;
+    await vi.waitFor(() => expect(partials).toEqual(['买菜花了300元，']));
 
     expect(native.createSTT).toHaveBeenCalledTimes(1);
   });

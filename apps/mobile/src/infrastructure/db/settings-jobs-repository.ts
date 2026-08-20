@@ -135,10 +135,12 @@ export class SettingsJobsRepository {
 
   listEligibleJobs(nowIso: string, limit = 10): ParseJob[] {
     const rows = this.db.all<ParseJobRow>(
-      `SELECT * FROM parse_jobs
-     WHERE status IN ('pending', 'failed_retryable')
-       AND next_eligible_at <= ?
-     ORDER BY next_eligible_at ASC
+      `SELECT jobs.* FROM parse_jobs AS jobs
+     JOIN raw_inputs AS raw ON raw.id = jobs.raw_input_id
+     WHERE jobs.status IN ('pending', 'failed_retryable')
+       AND jobs.next_eligible_at <= ?
+       AND raw.deleted_at IS NULL
+     ORDER BY jobs.next_eligible_at ASC
      LIMIT ?`,
       [nowIso, limit],
     );
@@ -151,7 +153,12 @@ export class SettingsJobsRepository {
      SET status = 'running', attempts = attempts + 1, updated_at = ?
      WHERE id = ?
        AND status IN ('pending', 'failed_retryable')
-       AND next_eligible_at <= ?`,
+       AND next_eligible_at <= ?
+       AND EXISTS (
+         SELECT 1 FROM raw_inputs
+         WHERE raw_inputs.id = parse_jobs.raw_input_id
+           AND raw_inputs.deleted_at IS NULL
+       )`,
       [nowIso, jobId, nowIso],
     );
     if (result.changes === 0) return undefined;
@@ -176,7 +183,7 @@ export class SettingsJobsRepository {
          last_error_category = NULL,
          last_error_message = NULL,
          updated_at = ?
-     WHERE id = ?`,
+     WHERE id = ? AND status = 'running'`,
       [
         meta?.modelVersion ?? null,
         meta?.providerHost ?? null,
@@ -224,6 +231,29 @@ export class SettingsJobsRepository {
     );
   }
 
+  softDeleteFailedRawInput(rawInputId: string, nowIso: string): void {
+    this.db.withTransaction(() => {
+      const raw = this.getRawInput(rawInputId);
+      if (!raw || raw.deletedAt) return;
+      if (raw.lifecycleStatus !== 'parse_failed') {
+        throw new Error('only a failed raw input can be deleted');
+      }
+      this.db.run(
+        `UPDATE raw_inputs
+         SET deleted_at = ?, updated_at = ?
+         WHERE id = ? AND deleted_at IS NULL`,
+        [nowIso, nowIso, rawInputId],
+      );
+      this.db.run(
+        `UPDATE parse_jobs
+         SET status = 'failed_terminal', last_error_category = 'user_deleted',
+             last_error_message = '用户删除了失败原文', next_eligible_at = ?, updated_at = ?
+         WHERE raw_input_id = ?`,
+        [nowIso, nowIso, rawInputId],
+      );
+    });
+  }
+
   markJobFailed(
     jobId: string,
     nowIso: string,
@@ -232,7 +262,7 @@ export class SettingsJobsRepository {
     retryable: boolean,
   ): void {
     const job = this.getParseJob(jobId);
-    if (!job) return;
+    if (!job || job.status !== 'running') return;
     const exhausted = job.attempts >= job.maxAttempts;
     const status = !retryable || exhausted ? 'failed_terminal' : 'failed_retryable';
     const backoffMs = Math.min(60_000, 1000 * 2 ** Math.max(0, job.attempts - 1));
@@ -241,7 +271,7 @@ export class SettingsJobsRepository {
       `UPDATE parse_jobs
      SET status = ?, last_error_category = ?, last_error_message = ?,
          next_eligible_at = ?, updated_at = ?
-     WHERE id = ?`,
+     WHERE id = ? AND status = 'running'`,
       [status, category, message, next, nowIso, jobId],
     );
   }
@@ -277,7 +307,7 @@ export class SettingsJobsRepository {
          parse_error_message = ?,
          candidates_json = ?,
          updated_at = ?
-     WHERE id = ?`,
+     WHERE id = ? AND deleted_at IS NULL`,
       [status, parseErrorCategory, parseErrorMessage, candidatesJson, nowIso, rawInputId],
     );
   }
@@ -289,22 +319,6 @@ export class SettingsJobsRepository {
        WHERE lifecycle_status IN ('pending_parse', 'pending_confirm', 'parse_failed')
          AND deleted_at IS NULL
        ORDER BY submitted_at DESC, id DESC`,
-      )
-      .map(mapRawInput);
-  }
-
-  listWithdrawnRawInputs(): RawInput[] {
-    return this.db
-      .all<RawInputRow>(
-        `SELECT raw_inputs.* FROM raw_inputs
-       WHERE raw_inputs.lifecycle_status = 'posted'
-         AND raw_inputs.deleted_at IS NULL
-         AND NOT EXISTS (
-           SELECT 1 FROM consumption_records
-           WHERE consumption_records.raw_input_id = raw_inputs.id
-             AND consumption_records.deleted_at IS NULL
-         )
-       ORDER BY raw_inputs.submitted_at DESC, raw_inputs.id DESC`,
       )
       .map(mapRawInput);
   }

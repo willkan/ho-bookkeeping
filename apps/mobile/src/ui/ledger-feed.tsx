@@ -4,13 +4,16 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { LedgerFeedItem } from '../application/ledger-feed';
 import type { LedgerPendingItem } from '../application/ledger-service';
 import { formatYuan } from '../domain/money';
-import type { ConsumptionRecord, RawInput } from '../domain/types';
+import type { ConsumptionRecord } from '../domain/types';
+import { consumptionRecordTitle } from './consumption-record-display';
 import { Chip, EmptyState } from './primitives';
 import { colors, spacing, typography } from './tokens';
 
 type Props = {
   items: LedgerFeedItem[];
   header: ReactElement;
+  emptyTitle?: string;
+  emptyDetail?: string;
   onOpenRecord: (recordId: string) => void;
   onDeleteRecord: (recordId: string) => void;
   onOpenPending: (rawInputId: string) => void;
@@ -51,16 +54,10 @@ function timeLabel(instant: string, timezone: string): string {
   }
 }
 
-const SectionRow = memo(function SectionRow({
-  section,
-  count,
-}: {
-  section: 'pending' | 'withdrawn';
-  count: number;
-}) {
+const SectionRow = memo(function SectionRow({ count }: { count: number }) {
   return (
     <View style={styles.sectionRow}>
-      <Text style={styles.sectionTitle}>{section === 'pending' ? '待处理' : '已撤销'}</Text>
+      <Text style={styles.sectionTitle}>待处理</Text>
       <Text style={typography.caption}>{count}</Text>
     </View>
   );
@@ -93,36 +90,32 @@ const PendingRow = memo(function PendingRow({
         ? 'confirm'
         : 'danger';
   const actionable = viewStatus !== 'pending_parse';
+  const failureReason =
+    viewStatus === 'parse_failed'
+      ? (raw.parseErrorMessage ?? '整理过程没有返回可用的消费记录')
+      : null;
   return (
     <Pressable
       style={({ pressed }) => [styles.rawRow, pressed && actionable && styles.pressed]}
       disabled={!actionable}
       onPress={() => (viewStatus === 'pending_confirm' ? onOpen(raw.id) : onRetry(raw.id))}
       accessibilityRole={actionable ? 'button' : undefined}
-      accessibilityLabel={`${raw.rawText}，${label}`}
+      accessibilityLabel={`${raw.rawText}，${label}${failureReason ? `，原因：${failureReason}` : ''}`}
+      accessibilityHint={viewStatus === 'parse_failed' ? '轻点重新整理或删除原文' : undefined}
     >
       <View style={styles.rowText}>
         <Text style={typography.body} numberOfLines={2}>
           {raw.rawText}
         </Text>
+        {failureReason ? (
+          <Text style={styles.failureReason} numberOfLines={2}>
+            原因：{failureReason}
+          </Text>
+        ) : null}
         <Text style={typography.caption}>{timeLabel(raw.submittedAt, raw.timezone)}</Text>
       </View>
       <Chip label={label} tone={tone} />
     </Pressable>
-  );
-});
-
-const WithdrawnRow = memo(function WithdrawnRow({ raw }: { raw: RawInput }) {
-  return (
-    <View style={styles.rawRow}>
-      <View style={styles.rowText}>
-        <Text style={styles.withdrawnText} numberOfLines={2}>
-          {raw.rawText}
-        </Text>
-        <Text style={typography.caption}>{timeLabel(raw.submittedAt, raw.timezone)}</Text>
-      </View>
-      <Chip label="已撤销" />
-    </View>
   );
 });
 
@@ -135,7 +128,7 @@ const RecordRow = memo(function RecordRow({
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
-  const title = record.merchant || record.note || '消费';
+  const title = consumptionRecordTitle(record);
   return (
     <Pressable
       style={({ pressed }) => [styles.recordRow, pressed && styles.pressed]}
@@ -143,8 +136,8 @@ const RecordRow = memo(function RecordRow({
       onLongPress={() => onDelete(record.id)}
       delayLongPress={450}
       accessibilityLabel={`记录 ${title}`}
-      accessibilityHint="轻点查看详情，长按删除"
-      accessibilityActions={[{ name: 'delete', label: '删除记录' }]}
+      accessibilityHint="轻点查看详情，长按撤销账单"
+      accessibilityActions={[{ name: 'delete', label: '撤销账单' }]}
       onAccessibilityAction={(event) => {
         if (event.nativeEvent.actionName === 'delete') onDelete(record.id);
       }}
@@ -163,6 +156,8 @@ const RecordRow = memo(function RecordRow({
 export function LedgerFeed({
   items,
   header,
+  emptyTitle,
+  emptyDetail,
   onOpenRecord,
   onDeleteRecord,
   onOpenPending,
@@ -174,19 +169,22 @@ export function LedgerFeed({
       keyExtractor={(item) => item.key}
       getItemType={(item) => item.type}
       ListHeaderComponent={header}
-      ListEmptyComponent={<EmptyState title="还没有账单" detail="记下一笔后会出现在这里" />}
+      ListEmptyComponent={
+        <EmptyState
+          title={emptyTitle ?? '还没有账单'}
+          detail={emptyDetail ?? '记下一笔后会出现在这里'}
+        />
+      }
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
       renderItem={({ item }) => {
         switch (item.type) {
           case 'section':
-            return <SectionRow section={item.section} count={item.count} />;
+            return <SectionRow count={item.count} />;
           case 'date':
             return <DateRow localDate={item.localDate} />;
           case 'pending':
             return <PendingRow item={item.item} onOpen={onOpenPending} onRetry={onRetryPending} />;
-          case 'withdrawn':
-            return <WithdrawnRow raw={item.raw} />;
           case 'record':
             return (
               <RecordRow record={item.record} onOpen={onOpenRecord} onDelete={onDeleteRecord} />
@@ -233,6 +231,6 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.divider,
   },
   rowText: { flex: 1, gap: spacing.xs },
-  withdrawnText: { ...typography.body, color: colors.muted },
+  failureReason: { ...typography.caption, color: colors.danger },
   pressed: { opacity: 0.62 },
 });

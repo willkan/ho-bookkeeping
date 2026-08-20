@@ -17,12 +17,12 @@ const baseRequest = {
     mode_id: 'mode_1',
     mode_name: '江西旅游',
     default_tags: [
-      { tag_id: 'tag_trip', name: '江西旅游', type: 'trip' as const },
-      { tag_id: 'tag_place', name: '景德镇', type: 'place' as const },
+      { tag_id: 'tag_trip', name: '江西旅游', type: 'other' as const },
+      { tag_id: 'tag_place', name: '景德镇', type: 'other' as const },
     ],
     include_in_mode_stats: true,
   },
-  tag_candidates: [{ id: 'tag_trip', name: '江西旅游', type: 'trip' as const, aliases: [] }],
+  tag_candidates: [{ id: 'tag_trip', name: '江西旅游', type: 'other' as const, aliases: [] }],
 };
 
 const simpleExpense = {
@@ -36,7 +36,7 @@ const simpleExpense = {
   list_price_minor: 10000,
   actual_cost_minor: 10000,
   discount_minor: 0,
-  tags: [{ name: '江西旅游', type: 'trip' as const, existing_tag_id: 'tag_trip' }],
+  tags: [{ name: '江西旅游', type: 'other' as const, existing_tag_id: 'tag_trip' }],
 };
 
 describe('transport contract skeletons and cases', () => {
@@ -131,9 +131,39 @@ describe('transport contract skeletons and cases', () => {
     }
   });
 
+  it('accepts discounted voucher economics without adding coupon fields', () => {
+    const voucherUse = {
+      ...simpleExpense,
+      list_price_minor: 66100,
+      actual_cost_minor: 57300,
+      discount_minor: 8800,
+    };
+    const parsed = CandidateRecordSchema.safeParse(voucherUse);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data).not.toHaveProperty('coupon_cost_minor');
+      expect(parsed.data).not.toHaveProperty('coupon_face_value_minor');
+    }
+  });
+
   // Positive: valid parse request with mode snapshot and tag candidates
   it('accepts a minimal parse request', () => {
     expect(ParseRequestSchema.safeParse(baseRequest).success).toBe(true);
+  });
+
+  it('accepts only category and other tag types', () => {
+    expect(
+      CandidateRecordSchema.safeParse({
+        ...simpleExpense,
+        tags: [{ name: '景德镇', type: 'other' }],
+      }).success,
+    ).toBe(true);
+    expect(
+      CandidateRecordSchema.safeParse({
+        ...simpleExpense,
+        tags: [{ name: '景德镇', type: 'place' }],
+      }).success,
+    ).toBe(false);
   });
 
   // Negative: floating-point money rejected

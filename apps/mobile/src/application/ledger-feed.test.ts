@@ -51,12 +51,10 @@ function record(id: string, localDate: string): ConsumptionRecord {
 }
 
 describe('ledger feed projection', () => {
-  it('places pending and withdrawn sections before occurred-date record sections', () => {
+  it('never emits a withdrawn section into the normal ledger feed', () => {
     const pendingRaw = raw('pending', 'pending_parse');
-    const withdrawnRaw = raw('withdrawn', 'posted');
     const projection: LedgerProjection = {
       pending: [{ raw: pendingRaw, viewStatus: 'pending_parse' }],
-      withdrawn: [withdrawnRaw],
       records: [record('today', '2026-07-16'), record('yesterday', '2026-07-15')],
     };
 
@@ -65,8 +63,6 @@ describe('ledger feed projection', () => {
     expect(feed.map((item) => item.key)).toEqual([
       'section-pending',
       'pending-pending',
-      'section-withdrawn',
-      'withdrawn-withdrawn',
       'date-2026-07-16',
       'record-today',
       'date-2026-07-15',
@@ -76,7 +72,6 @@ describe('ledger feed projection', () => {
   it('emits one date header for adjacent records on the same local date', () => {
     const projection: LedgerProjection = {
       pending: [],
-      withdrawn: [],
       records: [record('lunch', '2026-07-16'), record('dinner', '2026-07-16')],
     };
 

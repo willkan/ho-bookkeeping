@@ -1,11 +1,12 @@
-import { useLocalSearchParams } from 'expo-router';
-import React, { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useCallback, useMemo } from 'react';
+import { Text } from 'react-native';
 import { useApp } from '../../src/application/app-context';
 import { formatYuan } from '../../src/domain/money';
-import type { TagMatchMode, TrendGranularity } from '../../src/domain/types';
+import type { TagMatchMode, TrendBucket, TrendGranularity } from '../../src/domain/types';
 import { EmptyState, LoadingBlock, Screen } from '../../src/ui/primitives';
-import { colors, spacing, typography } from '../../src/ui/tokens';
+import { TrendBarChart } from '../../src/ui/statistics-charts';
+import { typography } from '../../src/ui/tokens';
 
 export default function TrendScreen() {
   const { start, end, granularity, tagIds, tagMatch } = useLocalSearchParams<{
@@ -16,6 +17,24 @@ export default function TrendScreen() {
     tagMatch?: TagMatchMode;
   }>();
   const { service, tick } = useApp();
+  const router = useRouter();
+
+  const openBucket = useCallback(
+    (bucket: TrendBucket) => {
+      router.push({
+        pathname: '/stats/drilldown',
+        params: {
+          start,
+          end,
+          tagIds: tagIds ?? '',
+          tagMatch: tagMatch ?? 'and',
+          granularity: granularity ?? 'day',
+          trendBucketKey: bucket.key,
+        },
+      });
+    },
+    [end, granularity, router, start, tagIds, tagMatch],
+  );
 
   const result = useMemo(() => {
     void tick;
@@ -46,48 +65,21 @@ export default function TrendScreen() {
     );
   }
 
-  const max = Math.max(1, ...result.buckets.map((b) => b.amountMinor));
+  const granularityLabel =
+    result.granularity === 'day' ? '按日' : result.granularity === 'week' ? '按周' : '按月';
 
   return (
     <Screen>
       <Text style={typography.secondary}>
-        期间合计 ¥{formatYuan(result.totalMinor)} · {result.granularity} ·{' '}
+        期间合计 ¥{formatYuan(result.totalMinor)} · {granularityLabel} ·{' '}
         {tagMatch === 'or' ? '满足任一' : '同时满足'}
       </Text>
-      <View style={styles.chart}>
-        {result.buckets.map((bucket) => (
-          <View key={bucket.key} style={styles.col}>
-            <View
-              style={[
-                styles.bar,
-                { height: Math.max(4, Math.round((bucket.amountMinor / max) * 120)) },
-              ]}
-            />
-            <Text style={styles.label}>{bucket.label.slice(5)}</Text>
-            <Text style={styles.val}>{formatYuan(bucket.amountMinor)}</Text>
-          </View>
-        ))}
-      </View>
-      <Text style={typography.caption}>没有消费的日期按 ¥0 显示</Text>
+      <TrendBarChart
+        buckets={result.buckets}
+        granularity={result.granularity}
+        onBucketPress={openBucket}
+      />
+      <Text style={typography.caption}>没有消费的时间按 ¥0 保留；左右滑动可查看全部</Text>
     </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  chart: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 6,
-    marginVertical: spacing.xl,
-    minHeight: 160,
-  },
-  col: { alignItems: 'center', flex: 1 },
-  bar: {
-    width: '80%',
-    backgroundColor: colors.accent,
-    borderTopLeftRadius: 4,
-    borderTopRightRadius: 4,
-  },
-  label: { ...typography.caption, marginTop: 4, fontSize: 10 },
-  val: { ...typography.caption, fontSize: 10 },
-});

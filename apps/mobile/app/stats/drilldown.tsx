@@ -4,20 +4,24 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useApp } from '../../src/application/app-context';
 import { formatYuan } from '../../src/domain/money';
-import type { StatFilter, TagMatchMode } from '../../src/domain/types';
+import type { StatFilter, TagMatchMode, TrendGranularity } from '../../src/domain/types';
+import { consumptionRecordTitle } from '../../src/ui/consumption-record-display';
 import { EmptyState, LoadingBlock, Screen } from '../../src/ui/primitives';
 import { colors, spacing, typography } from '../../src/ui/tokens';
 
 export default function DrilldownScreen() {
-  const { start, end, tagIds, tagMatch, modeId, groupId, bucketKey } = useLocalSearchParams<{
-    start?: string;
-    end?: string;
-    tagIds?: string;
-    tagMatch?: TagMatchMode;
-    modeId?: string;
-    groupId?: string;
-    bucketKey?: string;
-  }>();
+  const { start, end, tagIds, tagMatch, modeId, groupId, bucketKey, granularity, trendBucketKey } =
+    useLocalSearchParams<{
+      start?: string;
+      end?: string;
+      tagIds?: string;
+      tagMatch?: TagMatchMode;
+      modeId?: string;
+      groupId?: string;
+      bucketKey?: string;
+      granularity?: TrendGranularity;
+      trendBucketKey?: string;
+    }>();
   const { service, tick } = useApp();
   const router = useRouter();
 
@@ -40,10 +44,26 @@ export default function DrilldownScreen() {
         tagMatch: tagMatch ?? 'and',
       };
     }
-    return groupId && bucketKey
-      ? service.breakdownRecords(filter, groupId, bucketKey)
-      : service.filterRecords(filter);
-  }, [service, start, end, tagIds, tagMatch, modeId, groupId, bucketKey, tick]);
+    if (granularity && trendBucketKey) {
+      return service.trendRecords(filter, granularity, trendBucketKey);
+    }
+    if (groupId && bucketKey) {
+      return service.breakdownRecords(filter, groupId, bucketKey);
+    }
+    return service.filterRecords(filter);
+  }, [
+    service,
+    start,
+    end,
+    tagIds,
+    tagMatch,
+    modeId,
+    groupId,
+    bucketKey,
+    granularity,
+    trendBucketKey,
+    tick,
+  ]);
 
   if (!service) {
     return (
@@ -66,15 +86,26 @@ export default function DrilldownScreen() {
         <FlashList
           data={records}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <Pressable style={styles.row} onPress={() => router.push(`/record/${item.id}`)}>
-              <View style={{ flex: 1 }}>
-                <Text style={typography.body}>{item.merchant || '消费'}</Text>
-                <Text style={typography.caption}>{item.localDate}</Text>
-              </View>
-              <Text style={typography.amount}>¥{formatYuan(item.actualCostMinor)}</Text>
-            </Pressable>
-          )}
+          renderItem={({ item }) => {
+            const rawText = item.rawInputId
+              ? service.getRawInput(item.rawInputId)?.rawText
+              : undefined;
+            const title = consumptionRecordTitle(item, rawText);
+            const detail = item.note && item.note.trim() !== title ? item.note.trim() : null;
+            return (
+              <Pressable style={styles.row} onPress={() => router.push(`/record/${item.id}`)}>
+                <View style={styles.rowText}>
+                  <Text style={typography.body} numberOfLines={2}>
+                    {title}
+                  </Text>
+                  <Text style={typography.caption}>
+                    {detail ? `${detail} · ${item.localDate}` : item.localDate}
+                  </Text>
+                </View>
+                <Text style={typography.amount}>¥{formatYuan(item.actualCostMinor)}</Text>
+              </Pressable>
+            );
+          }}
         />
       )}
     </Screen>
@@ -90,4 +121,5 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.divider,
     gap: spacing.md,
   },
+  rowText: { flex: 1 },
 });

@@ -5,6 +5,42 @@ import { describe, expect, it } from 'vitest';
 const APP_ROOT = join(__dirname, '../..');
 
 describe('UI product-copy guards', () => {
+  it('routes withdrawn bills to a separate restorable archive screen', () => {
+    const ledger = readFileSync(join(APP_ROOT, 'app/(tabs)/ledger.tsx'), 'utf8');
+    const archive = readFileSync(join(APP_ROOT, 'app/withdrawn.tsx'), 'utf8');
+    const layout = readFileSync(join(APP_ROOT, 'app/_layout.tsx'), 'utf8');
+    const feed = readFileSync(join(APP_ROOT, 'src/ui/ledger-feed.tsx'), 'utf8');
+    expect(ledger).toContain("router.push('/withdrawn' as Href)");
+    expect(ledger).toContain('查看已撤销账单');
+    expect(archive).toContain('service?.listWithdrawnLedger()');
+    expect(archive).toContain('service.restoreConsumption(id)');
+    expect(archive).toContain('没有已撤销账单');
+    expect(layout).toContain('name="withdrawn"');
+    expect(feed).not.toContain('WithdrawnRow');
+    expect(feed).not.toContain("case 'withdrawn'");
+  });
+
+  it('ledger keyword search keeps existing record open and long-press delete actions', () => {
+    const route = readFileSync(join(APP_ROOT, 'app/(tabs)/ledger.tsx'), 'utf8');
+    const feed = readFileSync(join(APP_ROOT, 'src/ui/ledger-feed.tsx'), 'utf8');
+    expect(route).toContain('service.searchLedger(deferredKeyword)');
+    expect(route).toContain('placeholder="搜索商户、商品、原文或标签"');
+    expect(route).toContain('没有找到相关账单');
+    expect(route).toContain('长按可撤销');
+    expect(feed).toContain('onPress={() => onOpen(record.id)}');
+    expect(feed).toContain('onLongPress={() => onDelete(record.id)}');
+    expect(feed).toContain("name: 'delete', label: '撤销账单'");
+  });
+
+  it('failed raw inputs show their reason and offer confirmed soft deletion', () => {
+    const route = readFileSync(join(APP_ROOT, 'app/(tabs)/ledger.tsx'), 'utf8');
+    const feed = readFileSync(join(APP_ROOT, 'src/ui/ledger-feed.tsx'), 'utf8');
+    expect(feed).toContain('raw.parseErrorMessage');
+    expect(route).toContain("text: '删除原文'");
+    expect(route).toContain("'删除这条失败原文？'");
+    expect(route).toContain('service.softDeleteFailedRawInput(rawInputId)');
+  });
+
   it('record submit uses a non-blocking acknowledgement and never awaits queue execution', () => {
     const src = readFileSync(join(APP_ROOT, 'app/(tabs)/index.tsx'), 'utf8');
     expect(src).toContain('已保存，正在整理');
@@ -33,7 +69,7 @@ describe('UI product-copy guards', () => {
 
   it('ledger rows prefer the meaningful note when the merchant is empty', () => {
     const src = readFileSync(join(APP_ROOT, 'src/ui/ledger-feed.tsx'), 'utf8');
-    expect(src).toContain("const title = record.merchant || record.note || '消费'");
+    expect(src).toContain('const title = consumptionRecordTitle(record)');
     expect(src).toContain('accessibilityLabel={`记录 ${title}`}');
   });
 
@@ -50,10 +86,40 @@ describe('UI product-copy guards', () => {
   it('tag creation lets the user choose a typed dimension', () => {
     const tags = readFileSync(join(APP_ROOT, 'app/tags/index.tsx'), 'utf8');
     const modes = readFileSync(join(APP_ROOT, 'app/modes/edit.tsx'), 'utf8');
+    const tagTypes = readFileSync(join(APP_ROOT, 'src/ui/tag-types.ts'), 'utf8');
     expect(tags).toContain('TAG_TYPE_OPTIONS');
     expect(tags).toContain('service.createTag(newType');
     expect(modes).toContain('直接新建默认标签');
     expect(modes).toContain('service.createTag(newTagType');
+    expect(tagTypes).toContain("value: 'category'");
+    expect(tagTypes).toContain("value: 'other'");
+    expect(tagTypes).not.toMatch(/value: '(trip|place|merchant|channel|person|purpose)'/);
+  });
+
+  it('statistics uses a pie chart and readable scrollable trend buckets', () => {
+    const breakdown = readFileSync(join(APP_ROOT, 'app/stats/breakdown.tsx'), 'utf8');
+    const trend = readFileSync(join(APP_ROOT, 'app/stats/trend.tsx'), 'utf8');
+    const charts = readFileSync(join(APP_ROOT, 'src/ui/statistics-charts.tsx'), 'utf8');
+    expect(breakdown).toContain('<ConsumptionPieChart');
+    expect(breakdown).not.toContain('barTrack');
+    expect(trend).toContain('<TrendBarChart');
+    expect(charts).toContain('<ScrollView');
+    expect(charts).toContain('horizontal');
+    expect(charts).toContain('width: 58');
+    expect(charts).not.toContain("flex: 1,\n    alignItems: 'center'");
+  });
+
+  it('statistics charts drill into records and record rows retain meaningful context', () => {
+    const breakdown = readFileSync(join(APP_ROOT, 'app/stats/breakdown.tsx'), 'utf8');
+    const trend = readFileSync(join(APP_ROOT, 'app/stats/trend.tsx'), 'utf8');
+    const drilldown = readFileSync(join(APP_ROOT, 'app/stats/drilldown.tsx'), 'utf8');
+    const charts = readFileSync(join(APP_ROOT, 'src/ui/statistics-charts.tsx'), 'utf8');
+    expect(breakdown).toContain('onBucketPress={openBucket}');
+    expect(trend).toContain('onBucketPress={openBucket}');
+    expect(charts).toContain('onPress={() => onBucketPress?.(bucket)}');
+    expect(drilldown).toContain('service.trendRecords(');
+    expect(drilldown).toContain('consumptionRecordTitle(');
+    expect(drilldown).toContain('service.getRawInput(item.rawInputId)?.rawText');
   });
 
   it('mode default-tag creation uses an accessible add icon instead of a text primary button', () => {
@@ -97,15 +163,15 @@ describe('UI product-copy guards', () => {
     expect(src).not.toContain('expense|income|transfer');
   });
 
-  it('ledger exposes confirmed long-press deletion without a persistent icon', () => {
+  it('ledger exposes confirmed long-press withdrawal without a persistent icon', () => {
     const route = readFileSync(join(APP_ROOT, 'app/(tabs)/ledger.tsx'), 'utf8');
     const feed = readFileSync(join(APP_ROOT, 'src/ui/ledger-feed.tsx'), 'utf8');
     expect(feed).toContain('onLongPress');
-    expect(feed).toContain("name: 'delete', label: '删除记录'");
+    expect(feed).toContain("name: 'delete', label: '撤销账单'");
     expect(feed).not.toContain('name="trash-outline"');
     expect(feed).not.toContain('name="ellipsis-horizontal"');
-    expect(route).toContain("Alert.alert('删除这条记录？'");
-    expect(route).toContain("text: '删除记录'");
+    expect(route).toContain("Alert.alert('撤销这条账单？'");
+    expect(route).toContain("text: '确认撤销'");
     expect(route).toContain('service.softDeleteConsumption');
   });
 
@@ -113,6 +179,7 @@ describe('UI product-copy guards', () => {
     const tabs = readFileSync(join(APP_ROOT, 'app/(tabs)/_layout.tsx'), 'utf8');
     const recordHome = readFileSync(join(APP_ROOT, 'app/(tabs)/index.tsx'), 'utf8');
     expect(tabs).toContain("title: '账单'");
+    expect(tabs).toContain('android_ripple={null}');
     expect(recordHome).toContain("router.push('/ledger')");
     expect(existsSync(join(APP_ROOT, 'app/today.tsx'))).toBe(false);
   });

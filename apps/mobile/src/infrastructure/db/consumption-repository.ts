@@ -3,6 +3,10 @@ import type { ConsumptionRecord, LifecycleStatus, TagSource } from '../../domain
 import { mapConsumption, type ConsumptionRow } from './mappers';
 import { TagModeRepository } from './tag-mode-repository';
 
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, '\\$&');
+}
+
 export class ConsumptionRepository extends TagModeRepository {
   listEffectiveConsumptionRecords(): ConsumptionRecord[] {
     return this.db
@@ -10,6 +14,54 @@ export class ConsumptionRepository extends TagModeRepository {
         `SELECT * FROM consumption_records
          WHERE deleted_at IS NULL
          ORDER BY local_date DESC, occurred_at DESC, raw_input_id DESC, source_sequence ASC, id ASC`,
+      )
+      .map((row) => this.hydrateConsumption(row));
+  }
+
+  listWithdrawnConsumptionRecords(): ConsumptionRecord[] {
+    return this.db
+      .all<ConsumptionRow>(
+        `SELECT * FROM consumption_records
+         WHERE deleted_at IS NOT NULL
+         ORDER BY deleted_at DESC, occurred_at DESC, source_sequence ASC, id ASC`,
+      )
+      .map((row) => this.hydrateConsumption(row));
+  }
+
+  searchEffectiveConsumptionRecords(keyword: string): ConsumptionRecord[] {
+    const normalized = keyword.trim();
+    if (!normalized) return [];
+    const pattern = `%${escapeLikePattern(normalized)}%`;
+    return this.db
+      .all<ConsumptionRow>(
+        `SELECT records.*
+         FROM consumption_records AS records
+         LEFT JOIN raw_inputs AS raw ON raw.id = records.raw_input_id
+         WHERE records.deleted_at IS NULL
+           AND (
+             COALESCE(records.merchant, '') LIKE ? ESCAPE '\\' COLLATE NOCASE
+             OR COALESCE(records.note, '') LIKE ? ESCAPE '\\' COLLATE NOCASE
+             OR COALESCE(raw.raw_text, '') LIKE ? ESCAPE '\\' COLLATE NOCASE
+             OR EXISTS (
+               SELECT 1
+               FROM consumption_record_tags AS record_tags
+               JOIN tags ON tags.id = record_tags.tag_id
+               WHERE record_tags.consumption_record_id = records.id
+                 AND tags.deleted_at IS NULL
+                 AND tags.merged_into_tag_id IS NULL
+                 AND (
+                   tags.name LIKE ? ESCAPE '\\' COLLATE NOCASE
+                   OR EXISTS (
+                     SELECT 1
+                     FROM json_each(tags.aliases_json) AS aliases
+                     WHERE aliases.value LIKE ? ESCAPE '\\' COLLATE NOCASE
+                   )
+                 )
+             )
+           )
+         ORDER BY records.local_date DESC, records.occurred_at DESC,
+                  records.raw_input_id DESC, records.source_sequence ASC, records.id ASC`,
+        [pattern, pattern, pattern, pattern, pattern],
       )
       .map((row) => this.hydrateConsumption(row));
   }
@@ -48,6 +100,7 @@ export class ConsumptionRepository extends TagModeRepository {
     return this.db.withTransaction(() => {
       const raw = this.getRawInput(input.rawInputId);
       if (!raw) throw new Error('raw input missing');
+      if (raw.deletedAt) return [];
       const existing = this.listConsumptionByRawInput(input.rawInputId);
       if (raw.lifecycleStatus === 'posted' && existing.length > 0) return existing;
 
@@ -136,7 +189,7 @@ export class ConsumptionRepository extends TagModeRepository {
     );
   }
 
-  undoSoftDeleteConsumption(id: string, now: string): void {
+  restoreConsumption(id: string, now: string): void {
     this.db.run(
       `UPDATE consumption_records SET deleted_at = NULL, updated_at = ?
        WHERE id = ? AND deleted_at IS NOT NULL`,

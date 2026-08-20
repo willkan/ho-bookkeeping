@@ -5,18 +5,9 @@ import { z } from 'zod';
  * Built on device; provider output is validated against this shape locally.
  * Not a domain entity, SQLite row, or deployment gateway DTO.
  */
-export const CONTRACT_VERSION = '2.1.0' as const;
+export const CONTRACT_VERSION = '2.2.0' as const;
 
-export const TagTypeSchema = z.enum([
-  'category',
-  'trip',
-  'place',
-  'merchant',
-  'channel',
-  'person',
-  'purpose',
-  'other',
-]);
+export const TagTypeSchema = z.enum(['category', 'other']);
 export type TagType = z.infer<typeof TagTypeSchema>;
 
 /** Integer minor units only — never floating point money on the wire. */
@@ -69,9 +60,9 @@ export const CandidateRecordSchema = z
     currency: z.literal('CNY'),
     /** 商品原价 */
     list_price_minor: MoneyMinorSchema.nonnegative(),
-    /** 本次实付 */
+    /** 本次消费归属的实际成本；原文明确折价券成本时包含该成本 */
     actual_cost_minor: MoneyMinorSchema.nonnegative(),
-    /** 本次账单明确使用的优惠券抵扣 */
+    /** 本次消费的有效优惠；折价券为券面值减购券成本 */
     discount_minor: MoneyMinorSchema.nonnegative(),
     tags: z.array(CandidateTagSchema),
   })

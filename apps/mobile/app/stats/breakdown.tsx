@@ -1,10 +1,11 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useMemo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useMemo } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useApp } from '../../src/application/app-context';
 import { formatYuan } from '../../src/domain/money';
-import type { StatFilter, TagMatchMode } from '../../src/domain/types';
+import type { BreakdownBucket, StatFilter, TagMatchMode } from '../../src/domain/types';
 import { EmptyState, LoadingBlock, Screen } from '../../src/ui/primitives';
+import { BREAKDOWN_COLORS, ConsumptionPieChart } from '../../src/ui/statistics-charts';
 import { colors, spacing, typography } from '../../src/ui/tokens';
 
 export default function BreakdownScreen() {
@@ -50,6 +51,24 @@ export default function BreakdownScreen() {
   }, [service, filter, groupId, tick]);
   const { result, error } = outcome;
 
+  const openBucket = useCallback(
+    (bucket: BreakdownBucket) => {
+      router.push({
+        pathname: '/stats/drilldown',
+        params: {
+          start,
+          end,
+          tagIds: tagIds ?? '',
+          tagMatch: tagMatch ?? 'and',
+          modeId: modeId ?? '',
+          groupId,
+          bucketKey: bucket.key,
+        },
+      });
+    },
+    [end, groupId, modeId, router, start, tagIds, tagMatch],
+  );
+
   if (!service) {
     return (
       <Screen>
@@ -70,50 +89,40 @@ export default function BreakdownScreen() {
 
   return (
     <Screen>
-      <Text style={typography.secondary}>
-        {modeId ? '所选模式 · 全部时间' : `${start} ~ ${end}`} · 消费金额 ·{' '}
-        {tagMatch === 'or' ? '满足任一' : '同时满足'}
-      </Text>
-      <Text style={styles.total}>筛选后总额 ¥{formatYuan(result.totalMinor)}</Text>
-      {result.buckets.map((bucket) => (
-        <Pressable
-          key={bucket.key}
-          style={styles.row}
-          onPress={() =>
-            router.push({
-              pathname: '/stats/drilldown',
-              params: {
-                start,
-                end,
-                tagIds: tagIds ?? '',
-                tagMatch: tagMatch ?? 'and',
-                modeId: modeId ?? '',
-                groupId,
-                bucketKey: bucket.key,
-              },
-            })
-          }
-        >
-          <View style={styles.rowTop}>
-            <Text style={typography.body}>{bucket.label}</Text>
-            <Text style={typography.amount}>¥{formatYuan(bucket.amountMinor)}</Text>
-          </View>
-          <View style={styles.barTrack}>
-            <View
-              style={[styles.barFill, { width: `${Math.max(2, Math.round(bucket.share * 100))}%` }]}
-            />
-          </View>
-          <Text style={typography.caption}>{(bucket.share * 100).toFixed(1)}%</Text>
-        </Pressable>
-      ))}
-      <Text style={typography.caption}>
-        合计 ¥{formatYuan(result.totalMinor)} · 100% · 每笔只计算一次
-      </Text>
+      <ScrollView contentContainerStyle={styles.content}>
+        <Text style={typography.secondary}>
+          {modeId ? '所选模式 · 全部时间' : `${start} ~ ${end}`} · 消费金额 ·{' '}
+          {tagMatch === 'or' ? '满足任一' : '同时满足'}
+        </Text>
+        <Text style={styles.total}>筛选后总额 ¥{formatYuan(result.totalMinor)}</Text>
+        <ConsumptionPieChart buckets={result.buckets} onBucketPress={openBucket} />
+        {result.buckets.map((bucket, index) => (
+          <Pressable key={bucket.key} style={styles.row} onPress={() => openBucket(bucket)}>
+            <View style={styles.rowTop}>
+              <View style={styles.legendLabel}>
+                <View
+                  style={[
+                    styles.legendDot,
+                    { backgroundColor: BREAKDOWN_COLORS[index % BREAKDOWN_COLORS.length] },
+                  ]}
+                />
+                <Text style={typography.body}>{bucket.label}</Text>
+              </View>
+              <Text style={typography.amount}>¥{formatYuan(bucket.amountMinor)}</Text>
+            </View>
+            <Text style={typography.caption}>{(bucket.share * 100).toFixed(1)}%</Text>
+          </Pressable>
+        ))}
+        <Text style={typography.caption}>
+          合计 ¥{formatYuan(result.totalMinor)} · 100% · 每笔只计算一次
+        </Text>
+      </ScrollView>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  content: { paddingBottom: spacing.xl },
   total: { ...typography.headline, marginVertical: spacing.md },
   row: {
     backgroundColor: colors.surface,
@@ -123,13 +132,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.divider,
   },
-  rowTop: { flexDirection: 'row', justifyContent: 'space-between' },
-  barTrack: {
-    height: 8,
-    backgroundColor: colors.accentSoft,
-    borderRadius: 4,
-    marginTop: spacing.sm,
-    overflow: 'hidden',
-  },
-  barFill: { height: 8, backgroundColor: colors.accent },
+  rowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  legendLabel: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  legendDot: { width: 12, height: 12, borderRadius: 6 },
 });

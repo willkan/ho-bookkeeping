@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { AppState, InteractionManager, type AppStateStatus } from 'react-native';
+import { AppState, type AppStateStatus } from 'react-native';
 import { SenseVoiceVadModelArtifacts } from '../infrastructure/speech/sense-voice-vad-model-artifacts';
 import { SherpaStreamingSpeech } from '../infrastructure/speech/sherpa-streaming-speech';
 import type { StreamingSpeechPort } from './ports/streaming-speech';
@@ -35,8 +35,7 @@ export function SpeechRuntimeProvider({ children }: { children: React.ReactNode 
 
   useEffect(() => {
     if (!modelReady) return;
-    const task = InteractionManager.runAfterInteractions(prepare);
-    return () => task.cancel();
+    prepare();
   }, [modelReady, prepare]);
 
   useEffect(() => {

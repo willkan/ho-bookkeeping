@@ -139,6 +139,12 @@ function monthKey(localDate: string): string {
   return localDate.slice(0, 7);
 }
 
+function trendBucketKey(record: ConsumptionRecord, granularity: TrendGranularity): string {
+  if (granularity === 'day') return record.localDate;
+  if (granularity === 'week') return startOfIsoWeek(record.localDate);
+  return monthKey(record.localDate);
+}
+
 function eachDay(start: string, end: string): string[] {
   const out: string[] = [];
   const [ys, ms, ds] = start.split('-').map(Number) as [number, number, number];
@@ -198,10 +204,7 @@ export function computeTrend(
   const totals = new Map<string, number>();
 
   for (const record of filtered) {
-    let key: string;
-    if (granularity === 'day') key = record.localDate;
-    else if (granularity === 'week') key = startOfIsoWeek(record.localDate);
-    else key = monthKey(record.localDate);
+    const key = trendBucketKey(record, granularity);
     totals.set(key, (totals.get(key) ?? 0) + record.actualCostMinor);
   }
 
@@ -220,4 +223,19 @@ export function computeTrend(
 
   const totalMinor = buckets.reduce((s, b) => s + b.amountMinor, 0);
   return { totalMinor, granularity, buckets, metric: 'actual_cost' };
+}
+
+/** Records behind one trend bucket, using the exact same key rule as aggregation. */
+export function filterTrendBucketRecords(
+  records: readonly ConsumptionRecord[],
+  filter: StatFilter,
+  granularity: TrendGranularity,
+  bucketKey: string,
+): ConsumptionRecord[] {
+  if (filter.range.kind !== 'time') {
+    throw new Error('trend requires a time range filter');
+  }
+  return filterRecords(records, filter).filter(
+    (record) => trendBucketKey(record, granularity) === bucketKey,
+  );
 }

@@ -5,6 +5,7 @@ import {
   computeTrend,
   filterBreakdownBucketRecords,
   filterRecords,
+  filterTrendBucketRecords,
 } from '../domain/statistics';
 import type {
   BreakdownResult,
@@ -47,7 +48,6 @@ export type LedgerPendingItem = {
 
 export type LedgerProjection = {
   pending: LedgerPendingItem[];
-  withdrawn: RawInput[];
   records: ConsumptionRecord[];
 };
 
@@ -227,6 +227,16 @@ export class LedgerService {
       return;
     }
 
+    if (response.records.length === 0) {
+      this.repo.updateRawInputLifecycle(raw.id, 'parse_failed', nowIso, {
+        parseErrorCategory: 'no_records',
+        parseErrorMessage: '没有从这段原文中整理出消费记录，请重新整理',
+        candidatesJson: '[]',
+      });
+      this.repo.markJobSucceeded(jobId, nowIso, jobMetaFrom(execMeta));
+      return;
+    }
+
     if (raw.confirmMode === 'confirm_before_post') {
       this.repo.updateRawInputLifecycle(raw.id, 'pending_confirm', nowIso, {
         candidatesJson: JSON.stringify(response.records),
@@ -285,6 +295,9 @@ export class LedgerService {
     if (!validation.ok) {
       throw new Error(validation.issues.map((i) => i.message).join('; '));
     }
+    if (candidates.length === 0) {
+      throw new Error('confirmation requires at least one record');
+    }
     const now = new Date().toISOString();
     this.repo.postCandidateList({
       rawInputId,
@@ -313,15 +326,30 @@ export class LedgerService {
     });
   }
 
+  softDeleteFailedRawInput(rawInputId: string): void {
+    const raw = this.repo.getRawInput(rawInputId);
+    if (!raw || raw.deletedAt || raw.lifecycleStatus !== 'parse_failed') {
+      throw new Error('failed raw input not found');
+    }
+    this.repo.softDeleteFailedRawInput(rawInputId, new Date().toISOString());
+  }
+
   listLedger(): LedgerProjection {
     return {
       pending: this.repo.listUnresolvedRawInputs().map((raw) => ({
         raw,
         viewStatus: raw.lifecycleStatus as LedgerPendingItem['viewStatus'],
       })),
-      withdrawn: this.repo.listWithdrawnRawInputs(),
       records: this.repo.listEffectiveConsumptionRecords(),
     };
+  }
+
+  searchLedger(keyword: string): ConsumptionRecord[] {
+    return this.repo.searchEffectiveConsumptionRecords(keyword);
+  }
+
+  listWithdrawnLedger(): ConsumptionRecord[] {
+    return this.repo.listWithdrawnConsumptionRecords();
   }
 
   getConsumption(id: string): ConsumptionRecord | undefined {
@@ -369,8 +397,8 @@ export class LedgerService {
     this.repo.softDeleteConsumption(id, new Date().toISOString());
   }
 
-  undoSoftDelete(id: string): void {
-    this.repo.undoSoftDeleteConsumption(id, new Date().toISOString());
+  restoreConsumption(id: string): void {
+    this.repo.restoreConsumption(id, new Date().toISOString());
   }
 
   listModes(): Mode[] {
@@ -450,6 +478,19 @@ export class LedgerService {
       this.repo.listEffectiveConsumptionRecords(),
       filter,
       group,
+      bucketKey,
+    );
+  }
+
+  trendRecords(
+    filter: StatFilter,
+    granularity: TrendGranularity,
+    bucketKey: string,
+  ): ConsumptionRecord[] {
+    return filterTrendBucketRecords(
+      this.repo.listEffectiveConsumptionRecords(),
+      filter,
+      granularity,
       bucketKey,
     );
   }

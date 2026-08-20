@@ -120,7 +120,7 @@ describe('sqlite migrations and repository integration', () => {
     const group = repo.listExclusiveGroups().find(({ name }) => name === '消费类目');
     expect(group?.tagIds).toContain(tag.id);
 
-    repo.updateTagIdentity(tag.id, 'purpose', '聚餐', '2026-07-16T00:01:00.000Z');
+    repo.updateTagIdentity(tag.id, 'other', '聚餐', '2026-07-16T00:01:00.000Z');
     expect(
       repo.listExclusiveGroups().find(({ name }) => name === '消费类目')?.tagIds,
     ).not.toContain(tag.id);
@@ -198,7 +198,7 @@ describe('sqlite migrations and repository integration', () => {
     db.close();
   });
 
-  it('invalidates unconfirmed 2.0 proposals and advances unfinished jobs to date contract 2.1', () => {
+  it('invalidates unconfirmed 2.0 proposals and advances unfinished jobs to the current contract', () => {
     const db = openBetterSqliteDatabase(':memory:');
     migrateThroughVersion(db, 6);
     const repo = new LedgerRepository(db, new SequenceIdGenerator());
@@ -233,7 +233,62 @@ describe('sqlite migrations and repository integration', () => {
       candidatesJson: null,
       parseErrorCategory: 'unsupported_contract_version',
     });
-    expect(repo.getParseJob(submitted.job.id)?.contractVersion).toBe('2.1.0');
+    expect(repo.getParseJob(submitted.job.id)?.contractVersion).toBe('2.2.0');
+    db.close();
+  });
+
+  it('collapses legacy context tag types and snapshots into other for contract 2.2', () => {
+    const db = openBetterSqliteDatabase(':memory:');
+    migrateThroughVersion(db, 8);
+    const repo = new LedgerRepository(db, new SequenceIdGenerator());
+    const submitted = repo.submitRawInput({
+      id: 'raw-old-tag-contract',
+      rawText: '江西旅游在景德镇吃饭',
+      submittedAt: '2026-08-03T04:00:00.000Z',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-08-03',
+      confirmMode: 'confirm_before_post',
+      modeIdSnapshot: null,
+      modeNameSnapshot: null,
+      defaultTagsSnapshot: [],
+      includeInModeStats: false,
+      jobId: 'job-old-tag-contract',
+      clientRequestId: 'req-old-tag-contract',
+    });
+    db.run(
+      `INSERT INTO tags
+       (id, type, name, aliases_json, merged_into_tag_id, created_at, updated_at, deleted_at)
+       VALUES ('legacy-place', 'place', '景德镇', '[]', NULL, '2026-08-03', '2026-08-03', NULL)`,
+    );
+    db.run(
+      `UPDATE raw_inputs
+       SET lifecycle_status = 'pending_confirm',
+           candidates_json = '[{"tags":[{"name":"景德镇","type":"place"}]}]',
+           default_tags_snapshot_json = '[{"tagId":"legacy-place","name":"景德镇","type":"place"}]'
+       WHERE id = ?`,
+      [submitted.rawInput.id],
+    );
+    db.run(`UPDATE parse_jobs SET status = 'succeeded', contract_version = '2.1.0' WHERE id = ?`, [
+      submitted.job.id,
+    ]);
+
+    migrate(db);
+
+    expect(repo.getTag('legacy-place')?.type).toBe('other');
+    expect(repo.getRawInput(submitted.rawInput.id)).toMatchObject({
+      lifecycleStatus: 'parse_failed',
+      candidatesJson: null,
+      parseErrorCategory: 'unsupported_contract_version',
+      defaultTagsSnapshot: [{ tagId: 'legacy-place', name: '景德镇', type: 'other' }],
+    });
+    expect(repo.getParseJob(submitted.job.id)?.contractVersion).toBe('2.2.0');
+    expect(() =>
+      db.run(
+        `INSERT INTO tags
+         (id, type, name, aliases_json, merged_into_tag_id, created_at, updated_at, deleted_at)
+         VALUES ('invalid-trip', 'trip', '旧行程', '[]', NULL, '2026-08-03', '2026-08-03', NULL)`,
+      ),
+    ).toThrow(/category or other/);
     db.close();
   });
 
@@ -274,7 +329,7 @@ describe('sqlite migrations and repository integration', () => {
           tags: [
             {
               name: '旅游',
-              type: 'trip',
+              type: 'category',
               existing_tag_id: 'preset_trip_travel',
             },
           ],
@@ -302,6 +357,79 @@ describe('sqlite migrations and repository integration', () => {
     db.close();
   });
 
+  it('recovers legacy posted raw inputs that never produced a consumption record', () => {
+    const db = openBetterSqliteDatabase(':memory:');
+    migrateThroughVersion(db, 9);
+    const repo = new LedgerRepository(db, new SequenceIdGenerator());
+    const empty = repo.submitRawInput({
+      id: 'raw-empty-proposal',
+      rawText: '67、购物无印良品。',
+      submittedAt: '2026-08-19T04:00:00.000Z',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-08-19',
+      confirmMode: 'auto_post',
+      modeIdSnapshot: null,
+      modeNameSnapshot: null,
+      defaultTagsSnapshot: [],
+      includeInModeStats: false,
+      jobId: 'job-empty-proposal',
+      clientRequestId: 'req-empty-proposal',
+    });
+    db.run(
+      `UPDATE raw_inputs
+       SET lifecycle_status = 'posted', candidates_json = '[]'
+       WHERE id = ?`,
+      [empty.rawInput.id],
+    );
+    db.run(`UPDATE parse_jobs SET status = 'succeeded' WHERE id = ?`, [empty.job.id]);
+
+    const withdrawn = repo.submitRawInput({
+      id: 'raw-withdrawn-record',
+      rawText: '买菜30元',
+      submittedAt: '2026-08-19T04:01:00.000Z',
+      timezone: 'Asia/Shanghai',
+      localDate: '2026-08-19',
+      confirmMode: 'auto_post',
+      modeIdSnapshot: null,
+      modeNameSnapshot: null,
+      defaultTagsSnapshot: [],
+      includeInModeStats: false,
+      jobId: 'job-withdrawn-record',
+      clientRequestId: 'req-withdrawn-record',
+    });
+    repo.postCandidateList({
+      rawInputId: withdrawn.rawInput.id,
+      now: '2026-08-19T04:02:00.000Z',
+      lifecycle: 'posted',
+      records: [
+        {
+          direction: 'expense',
+          merchant: null,
+          note: '买菜',
+          occurred_at: '2026-08-19T04:01:00.000Z',
+          timezone: 'Asia/Shanghai',
+          local_date: '2026-08-19',
+          currency: 'CNY',
+          list_price_minor: 3000,
+          actual_cost_minor: 3000,
+          discount_minor: 0,
+          tags: [],
+        },
+      ],
+    });
+    const withdrawnRecord = repo.listEffectiveConsumptionRecords()[0]!;
+    repo.softDeleteConsumption(withdrawnRecord.id, '2026-08-19T04:03:00.000Z');
+
+    migrate(db);
+
+    expect(repo.getRawInput(empty.rawInput.id)).toMatchObject({
+      lifecycleStatus: 'parse_failed',
+      parseErrorCategory: 'no_records',
+    });
+    expect(repo.getRawInput(withdrawn.rawInput.id)?.lifecycleStatus).toBe('posted');
+    db.close();
+  });
+
   // Positive: migrations apply on empty database
   it('applies forward migrations and seeds defaults', () => {
     const db = openBetterSqliteDatabase(':memory:');
@@ -310,7 +438,7 @@ describe('sqlite migrations and repository integration', () => {
     const version = db.get<{ version: number }>(
       'SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1',
     );
-    expect(version?.version).toBe(8);
+    expect(version?.version).toBe(10);
     const settings = new LedgerRepository(db, new SequenceIdGenerator()).getSettings();
     expect(settings.confirmMode).toBe('auto_post');
     db.close();

@@ -23,6 +23,7 @@ type ActiveSession = {
   generation: number;
   mic: PcmLiveStreamHandle;
   vad: VoiceActivityDetector;
+  engineReady: Promise<SttEngine>;
   observer: StreamingSpeechObserver;
   transcripts: string[];
   removeDataListener: () => void;
@@ -78,7 +79,6 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
     if (this.active) throw new StreamingSpeechError('busy');
     const generation = ++this.generation;
     const modelPath = await this.requireModelPath();
-    await this.getOrCreateEngine(modelPath);
     let vad: VoiceActivityDetector | null = null;
     let mic: PcmLiveStreamHandle | null = null;
 
@@ -94,6 +94,7 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
         numThreads: 1,
         provider: 'cpu',
       });
+      const engineReady = this.getOrCreateEngine(modelPath);
       mic = createPcmLiveStream({
         sampleRate: SAMPLE_RATE,
         channelCount: 1,
@@ -103,6 +104,7 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
         generation,
         mic,
         vad,
+        engineReady,
         observer,
         transcripts: [],
         removeDataListener: () => {},
@@ -130,6 +132,9 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
       });
       session.removeErrorListener = mic.onError((message) => {
         this.signalFailure(session, 'capture-failed', new Error(message));
+      });
+      void engineReady.catch((error: unknown) => {
+        this.signalFailure(session, 'model-load-failed', error);
       });
       this.active = session;
       await mic.start();
@@ -278,9 +283,10 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
     session: ActiveSession,
     segments: readonly VoiceActivitySegment[],
   ): Promise<void> {
+    const engine = await session.engineReady;
     for (const segment of segments) {
       if (session.cancelled) return;
-      const result = await this.engine!.transcribeSamples(segment.samples, SAMPLE_RATE);
+      const result = await engine.transcribeSamples(segment.samples, SAMPLE_RATE);
       const text = result.text.trim();
       if (!text) continue;
       session.transcripts.push(text);
@@ -292,14 +298,15 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
 
   private signalFailure(
     session: ActiveSession,
-    code: 'capture-failed' | 'recognition-failed',
+    code: 'model-load-failed' | 'capture-failed' | 'recognition-failed',
     error: unknown,
   ): void {
     if (session.failure || session.cancelled) return;
-    session.failure = new StreamingSpeechError(code);
+    session.failure =
+      error instanceof StreamingSpeechError ? error : new StreamingSpeechError(code);
     logger.error('stream_runtime_failed', {
       generation: session.generation,
-      category: code,
+      category: session.failure.code,
       diagnostic: sanitizeDiagnosticMessage(error instanceof Error ? error.message : String(error)),
     });
     if (this.active === session && !session.finalizing) {

@@ -355,6 +355,90 @@ WHERE id = 'preset_trip_travel'
   AND merged_into_tag_id IS NULL;
 `,
   },
+  {
+    version: 9,
+    sql: `
+-- Contract 2.2 keeps exactly two tag types: category and other.
+-- Preserve tag identity and every record/mode reference while collapsing old context types.
+UPDATE tags
+SET type = 'other',
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE type != 'category';
+
+UPDATE raw_inputs
+SET default_tags_snapshot_json = (
+      SELECT json_group_array(
+        json(
+          CASE
+            WHEN json_extract(value, '$.type') = 'category' THEN value
+            ELSE json_set(value, '$.type', 'other')
+          END
+        )
+      )
+      FROM json_each(raw_inputs.default_tags_snapshot_json)
+    ),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE EXISTS (
+  SELECT 1
+  FROM json_each(raw_inputs.default_tags_snapshot_json)
+  WHERE json_extract(value, '$.type') NOT IN ('category', 'other')
+);
+
+-- Unconfirmed proposals using the wider 2.1 type set cannot cross the new local contract.
+UPDATE parse_jobs
+SET contract_version = '2.2.0',
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE status != 'succeeded'
+   OR raw_input_id IN (
+     SELECT id
+     FROM raw_inputs
+     WHERE lifecycle_status = 'pending_confirm'
+        OR parse_error_category = 'unsupported_contract_version'
+   );
+
+UPDATE raw_inputs
+SET lifecycle_status = 'parse_failed',
+    candidates_json = NULL,
+    parse_error_category = 'unsupported_contract_version',
+    parse_error_message = '请按新版标签规则重新整理',
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE lifecycle_status = 'pending_confirm';
+
+CREATE TRIGGER enforce_tag_type_after_contract_2_2_insert
+BEFORE INSERT ON tags
+WHEN NEW.type NOT IN ('category', 'other')
+BEGIN
+  SELECT RAISE(ABORT, 'tag type must be category or other');
+END;
+
+CREATE TRIGGER enforce_tag_type_after_contract_2_2_update
+BEFORE UPDATE OF type ON tags
+WHEN NEW.type NOT IN ('category', 'other')
+BEGIN
+  SELECT RAISE(ABORT, 'tag type must be category or other');
+END;
+`,
+  },
+  {
+    version: 10,
+    sql: `
+-- A posted raw input must own at least one consumption record, including withdrawn records.
+-- Recover historical empty AI proposals into the visible, retryable parse-failed state.
+UPDATE raw_inputs
+SET lifecycle_status = 'parse_failed',
+    parse_error_category = 'no_records',
+    parse_error_message = '没有从这段原文中整理出消费记录，请重新整理',
+    candidates_json = '[]',
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE lifecycle_status = 'posted'
+  AND deleted_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM consumption_records
+    WHERE consumption_records.raw_input_id = raw_inputs.id
+  );
+`,
+  },
 ];
 
 export function migrate(db: SqliteDatabase): void {

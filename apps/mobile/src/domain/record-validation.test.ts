@@ -32,6 +32,18 @@ describe('record amount validation', () => {
     ).toEqual({ ok: true });
   });
 
+  it('accepts 412-for-500 voucher use on a 661 bill as cost 573 and saving 88', () => {
+    expect(
+      validateCandidateList([
+        expense({
+          list_price_minor: 66100,
+          actual_cost_minor: 57300,
+          discount_minor: 8800,
+        }),
+      ]),
+    ).toEqual({ ok: true });
+  });
+
   it('blocks the whole proposal when one record violates paid plus discount', () => {
     const result = validateCandidateList([
       expense(),

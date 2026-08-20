@@ -46,10 +46,10 @@ describe('PARSE_SYSTEM_PROMPT for Chat Completions JSON mode', () => {
     expect(PARSE_SYSTEM_PROMPT).toMatch(/local_date.*request local_date/i);
   });
 
-  it('distinguishes the travel consumption category from a specifically named trip', () => {
+  it('distinguishes the travel consumption category from other trip context', () => {
     expect(PARSE_SYSTEM_PROMPT).toMatch(/旅游.*category/i);
-    expect(PARSE_SYSTEM_PROMPT).toMatch(/江西旅游.*trip/i);
-    expect(PARSE_SYSTEM_PROMPT).toMatch(/do not use.*trip.*instead of.*category/i);
+    expect(PARSE_SYSTEM_PROMPT).toMatch(/江西旅游.*other/i);
+    expect(PARSE_SYSTEM_PROMPT).toMatch(/do not use.*other.*instead of.*category/i);
   });
 
   it('treats coupon use as checkout discount without coupon identity or purchase tracking', () => {
@@ -57,6 +57,14 @@ describe('PARSE_SYSTEM_PROMPT for Chat Completions JSON mode', () => {
     expect(PARSE_SYSTEM_PROMPT).toContain('"discount_minor":2000');
     expect(PARSE_SYSTEM_PROMPT).not.toMatch(/coupon_id|available_coupons|coupon_purchase/i);
     expect(PARSE_SYSTEM_PROMPT).not.toMatch(/COUPON ACQUISITION/i);
+  });
+
+  it('attributes a discounted voucher cost to the current consumption', () => {
+    expect(PARSE_SYSTEM_PROMPT).toMatch(/face value.*purchase cost|purchase cost.*face value/i);
+    expect(PARSE_SYSTEM_PROMPT).toContain('raw_text: 661买菜。用了412抵500的券。');
+    expect(PARSE_SYSTEM_PROMPT).toContain('"list_price_minor":66100');
+    expect(PARSE_SYSTEM_PROMPT).toContain('"actual_cost_minor":57300');
+    expect(PARSE_SYSTEM_PROMPT).toContain('"discount_minor":8800');
   });
 
   it('sends no coupon catalog or ledger history', () => {
@@ -116,16 +124,7 @@ describe('PARSE_SYSTEM_PROMPT for Chat Completions JSON mode', () => {
       if (r.tags.length > 0) {
         for (const t of r.tags) {
           expect(t.name.length).toBeGreaterThan(0);
-          expect([
-            'category',
-            'trip',
-            'place',
-            'merchant',
-            'channel',
-            'person',
-            'purpose',
-            'other',
-          ]).toContain(t.type);
+          expect(['category', 'other']).toContain(t.type);
         }
       }
     }

@@ -1,6 +1,6 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
-import { Text } from 'react-native';
+import { Pressable, Text } from 'react-native';
 import { colors } from '../../src/ui/tokens';
 
 function TabIcon({ glyph, focused }: { glyph: string; focused: boolean }) {
@@ -16,6 +16,7 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.muted,
+        tabBarButton: ({ ref: _ref, ...props }) => <Pressable {...props} android_ripple={null} />,
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.divider,

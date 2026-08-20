@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import { useRouter, type Href } from 'expo-router';
+import React, { useCallback, useDeferredValue, useMemo, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -47,6 +47,8 @@ export default function LedgerHomeScreen() {
   const [granularity, setGranularity] = useState<TrendGranularity>('day');
   const [modeId, setModeId] = useState<string | null>(null);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const deferredKeyword = useDeferredValue(searchKeyword.trim());
 
   const groups = useMemo(() => {
     void tick;
@@ -62,9 +64,18 @@ export default function LedgerHomeScreen() {
   }, [service, tick]);
   const ledger = useMemo(() => {
     void tick;
-    return service?.listLedger() ?? { pending: [], withdrawn: [], records: [] };
+    return service?.listLedger() ?? { pending: [], records: [] };
   }, [service, tick]);
-  const feed = useMemo(() => buildLedgerFeed(ledger), [ledger]);
+  const searchRecords = useMemo(() => {
+    void tick;
+    return service && deferredKeyword ? service.searchLedger(deferredKeyword) : [];
+  }, [deferredKeyword, service, tick]);
+  const searchActive = deferredKeyword.length > 0;
+  const displayedLedger = useMemo(
+    () => (searchActive ? { pending: [], records: searchRecords } : ledger),
+    [ledger, searchActive, searchRecords],
+  );
+  const feed = useMemo(() => buildLedgerFeed(displayedLedger), [displayedLedger]);
   const monthRecords = useMemo(() => {
     return ledger.records.filter(
       (record) => record.localDate >= defaults.start && record.localDate <= defaults.end,
@@ -108,10 +119,10 @@ export default function LedgerHomeScreen() {
 
   const confirmDeleteRecord = useCallback(
     (recordId: string) => {
-      Alert.alert('删除这条记录？', '删除后将不再计入账本和统计。', [
+      Alert.alert('撤销这条账单？', '撤销后将不再计入账本和统计。', [
         { text: '取消', style: 'cancel' },
         {
-          text: '删除记录',
+          text: '确认撤销',
           style: 'destructive',
           onPress: () => {
             if (!service) return;
@@ -145,6 +156,27 @@ export default function LedgerHomeScreen() {
       Alert.alert('这次输入还没有整理成功', raw?.parseErrorMessage ?? '可以重新整理一次。', [
         { text: '稍后处理', style: 'cancel' },
         {
+          text: '删除原文',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              '删除这条失败原文？',
+              '删除后将从待处理区移除，晚到的解析结果也不会入账。',
+              [
+                { text: '取消', style: 'cancel' },
+                {
+                  text: '确认删除',
+                  style: 'destructive',
+                  onPress: () => {
+                    service.softDeleteFailedRawInput(rawInputId);
+                    void refresh();
+                  },
+                },
+              ],
+            );
+          },
+        },
+        {
           text: '重新整理',
           onPress: () => {
             service.retryParse(rawInputId);
@@ -166,28 +198,72 @@ export default function LedgerHomeScreen() {
 
   const header = (
     <View>
-      <Text style={typography.title}>账单</Text>
-      <View style={styles.overview}>
-        <Text style={typography.secondary}>本月消费</Text>
-        <Text style={styles.total}>¥{formatYuan(monthTotal)}</Text>
-        <Text style={typography.caption}>{monthRecords.length} 条记录</Text>
-      </View>
-
-      <View style={styles.analysisRow}>
-        <Pressable style={styles.analysisButton} onPress={() => openFilters('breakdown')}>
-          <Ionicons name="pie-chart-outline" size={22} color={colors.accent} />
-          <Text style={styles.analysisLabel}>消费占比</Text>
-        </Pressable>
-        <Pressable style={styles.analysisButton} onPress={() => openFilters('trend')}>
-          <Ionicons name="bar-chart-outline" size={22} color={colors.accent} />
-          <Text style={styles.analysisLabel}>消费趋势</Text>
+      <View style={styles.titleRow}>
+        <Text style={typography.title}>账单</Text>
+        <Pressable
+          style={({ pressed }) => [styles.withdrawnEntry, pressed && styles.pressed]}
+          onPress={() => router.push('/withdrawn' as Href)}
+          accessibilityRole="button"
+          accessibilityLabel="查看已撤销账单"
+        >
+          <Ionicons name="archive-outline" size={18} color={colors.muted} />
+          <Text style={styles.withdrawnEntryText}>已撤销</Text>
         </Pressable>
       </View>
+      <View style={styles.searchBox}>
+        <Ionicons name="search" size={20} color={colors.muted} />
+        <TextInput
+          value={searchKeyword}
+          onChangeText={setSearchKeyword}
+          placeholder="搜索商户、商品、原文或标签"
+          placeholderTextColor={colors.muted}
+          style={styles.searchInput}
+          returnKeyType="search"
+          autoCorrect={false}
+          accessibilityLabel="搜索账单"
+        />
+        {searchKeyword ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="清空账单搜索"
+            hitSlop={10}
+            onPress={() => setSearchKeyword('')}
+          >
+            <Ionicons name="close-circle" size={20} color={colors.muted} />
+          </Pressable>
+        ) : null}
+      </View>
 
-      <Pressable style={styles.filterSummary} onPress={() => openFilters('breakdown')}>
-        <Text style={[typography.body, { flex: 1 }]}>{filterSummary}</Text>
-        <Ionicons name="options-outline" size={21} color={colors.ink} />
-      </Pressable>
+      {searchActive ? (
+        <View style={styles.searchSummary}>
+          <Text style={typography.secondary}>找到 {searchRecords.length} 条账单</Text>
+          <Text style={typography.caption}>轻点查看详情，长按可撤销</Text>
+        </View>
+      ) : (
+        <>
+          <View style={styles.overview}>
+            <Text style={typography.secondary}>本月消费</Text>
+            <Text style={styles.total}>¥{formatYuan(monthTotal)}</Text>
+            <Text style={typography.caption}>{monthRecords.length} 条记录</Text>
+          </View>
+
+          <View style={styles.analysisRow}>
+            <Pressable style={styles.analysisButton} onPress={() => openFilters('breakdown')}>
+              <Ionicons name="pie-chart-outline" size={22} color={colors.accent} />
+              <Text style={styles.analysisLabel}>消费占比</Text>
+            </Pressable>
+            <Pressable style={styles.analysisButton} onPress={() => openFilters('trend')}>
+              <Ionicons name="bar-chart-outline" size={22} color={colors.accent} />
+              <Text style={styles.analysisLabel}>消费趋势</Text>
+            </Pressable>
+          </View>
+
+          <Pressable style={styles.filterSummary} onPress={() => openFilters('breakdown')}>
+            <Text style={[typography.body, { flex: 1 }]}>{filterSummary}</Text>
+            <Ionicons name="options-outline" size={21} color={colors.ink} />
+          </Pressable>
+        </>
+      )}
     </View>
   );
 
@@ -196,6 +272,8 @@ export default function LedgerHomeScreen() {
       <LedgerFeed
         items={feed}
         header={header}
+        emptyTitle={searchActive ? '没有找到相关账单' : undefined}
+        emptyDetail={searchActive ? '换个商户、商品、原文或标签试试' : undefined}
         onOpenRecord={openRecord}
         onDeleteRecord={confirmDeleteRecord}
         onOpenPending={openPending}
@@ -398,6 +476,34 @@ function Segment({
 }
 
 const styles = StyleSheet.create({
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  withdrawnEntry: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+  },
+  withdrawnEntryText: { ...typography.secondary, color: colors.muted },
+  pressed: { opacity: 0.65 },
+  searchBox: {
+    minHeight: 44,
+    marginTop: spacing.lg,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.divider,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  searchInput: { flex: 1, color: colors.ink, fontSize: 16, paddingVertical: spacing.sm },
+  searchSummary: { paddingVertical: spacing.lg, gap: spacing.xs },
   overview: { paddingVertical: spacing.xl },
   total: { fontSize: 34, fontWeight: '700', color: colors.accent, marginVertical: spacing.xs },
   analysisRow: { flexDirection: 'row', gap: spacing.sm },

@@ -3,6 +3,7 @@ import {
   computeExclusiveBreakdown,
   computeTrend,
   filterBreakdownBucketRecords,
+  filterTrendBucketRecords,
   filterRecords,
 } from './statistics';
 import type { ConsumptionRecord, ExclusiveStatGroup, Tag } from './types';
@@ -55,7 +56,7 @@ const tagsById = new Map<string, Tag>([
     travel,
     {
       id: travel,
-      type: 'trip',
+      type: 'other',
       name: '江西旅游',
       aliases: [],
       mergedIntoTagId: null,
@@ -68,7 +69,7 @@ const tagsById = new Map<string, Tag>([
     place,
     {
       id: place,
-      type: 'place',
+      type: 'other',
       name: '景德镇',
       aliases: [],
       mergedIntoTagId: null,
@@ -286,5 +287,30 @@ describe('statistics projections', () => {
       '__unclassified__',
     );
     expect(filtered.map((item) => item.id)).toEqual(['other']);
+  });
+
+  it('drills through to exactly one trend bucket with the same granularity rule', () => {
+    const records = [
+      record({ id: 'july-1', localDate: '2026-07-01', actualCostMinor: 100 }),
+      record({ id: 'july-8', localDate: '2026-07-08', actualCostMinor: 100 }),
+      record({ id: 'august-1', localDate: '2026-08-01', actualCostMinor: 100 }),
+    ];
+    const filter = {
+      range: {
+        kind: 'time' as const,
+        startLocalDate: '2026-07-01',
+        endLocalDate: '2026-08-31',
+      },
+      tagIds: [],
+      tagMatch: 'and' as const,
+    };
+
+    expect(
+      filterTrendBucketRecords(records, filter, 'week', '2026-06-29').map((r) => r.id),
+    ).toEqual(['july-1']);
+    expect(filterTrendBucketRecords(records, filter, 'month', '2026-07').map((r) => r.id)).toEqual([
+      'july-1',
+      'july-8',
+    ]);
   });
 });
