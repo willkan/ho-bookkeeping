@@ -27,17 +27,10 @@ if test -f "$pilot_release_file"; then
 fi
 pilot_timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p backups
-python3 - data/pilot.sqlite "backups/pilot-pre-rollout-$pilot_timestamp.sqlite" <<'PY'
-import sqlite3
-import sys
-
-source = sqlite3.connect(sys.argv[1], timeout=10)
-target = sqlite3.connect(sys.argv[2])
-with target:
-    source.backup(target)
-target.close()
-source.close()
-PY
+pilot_backup_file="backups/pilot-pre-rollout-$pilot_timestamp.sqlite"
+# The ECS currently provides SQLite 3.26/Python 3.6. The sqlite3 CLI's online
+# backup command is supported there and remains consistent while WAL is active.
+sqlite3 data/pilot.sqlite ".timeout 10000" ".backup '$pilot_backup_file'"
 
 pilot_restore() {
   if test -n "$pilot_previous_image"; then

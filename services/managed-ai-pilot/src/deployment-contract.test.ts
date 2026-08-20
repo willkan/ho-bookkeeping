@@ -25,6 +25,8 @@ describe('managed pilot GitHub Actions deployment contract', () => {
     expect(workflow).toContain('sudo /usr/local/sbin/deploy-bookkeeping-managed-ai-pilot');
     expect(rollout).toContain('bookkeeping-managed-ai-pilot:main-[0-9a-f]{7}');
     expect(rollout).toContain('--no-deps --force-recreate managed-ai-pilot');
+    expect(rollout).toContain('sqlite3 data/pilot.sqlite');
+    expect(rollout).toContain(".backup '$pilot_backup_file'");
     expect(rollout).toContain('pilot_restore');
     expect(rollout).not.toMatch(/docker compose down|--remove-orphans|docker image prune/);
   });
