@@ -13,6 +13,8 @@ describe('expo-background-task parse seam', () => {
     expect(src).toMatch(/openAppDatabase/);
     expect(src).toMatch(/OpenAiCompatibleParseTransport/);
     expect(src).toMatch(/SecureProviderConfigRepository/);
+    expect(src).toMatch(/SelectedAiParseTransport/);
+    expect(src).toMatch(/SecureManagedPilotRepository/);
     expect(src.includes('FakeAiParseTransport')).toBe(false);
     expect(src.includes('demoRecordsFromText')).toBe(false);
     expect(src).toMatch(/setSharedParseJobRunner/);

@@ -144,6 +144,19 @@ describe('UI product-copy guards', () => {
     expect(src).not.toMatch(/SQLite|正式队列|后台调度|configRevision|providerHost/);
   });
 
+  it('settings exposes anonymous payment willingness without presenting a payment flow', () => {
+    const settings = readFileSync(join(APP_ROOT, 'app/(tabs)/settings.tsx'), 'utf8');
+    const support = readFileSync(join(APP_ROOT, 'src/ui/support-author-screen.tsx'), 'utf8');
+    expect(settings).toContain('支持作者 · 付费意愿');
+    expect(settings).toContain("router.push('/support-author')");
+    expect(support).toContain('愿意为正式版付费');
+    expect(support).toContain('还不确定');
+    expect(support).toContain('暂不愿意');
+    expect(support).toContain('这不是付款，也不会产生扣费');
+    expect(support).toContain('不占用 AI 解析额度');
+    expect(support).not.toMatch(/支付金额|信用卡|支付宝|微信支付|内购/);
+  });
+
   it('ledger offers an explicit mode scope and never passes mode into trend', () => {
     const src = readFileSync(join(APP_ROOT, 'app/(tabs)/ledger.tsx'), 'utf8');
     expect(src).toContain('label="按模式"');

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-describe('production AI path contract (BYOK)', () => {
+describe('production AI path contract (explicit BYOK or managed pilot)', () => {
   // Negative: AppProvider must not import FakeAiParseTransport or demoRecordsFromText
   it('app-context has no demo/fake production fallback', () => {
     const src = readFileSync(join(__dirname, 'app-context.tsx'), 'utf8');
@@ -10,6 +10,8 @@ describe('production AI path contract (BYOK)', () => {
     expect(src).not.toMatch(/demoRecordsFromText/);
     expect(src).toMatch(/OpenAiCompatibleParseTransport/);
     expect(src).toMatch(/SecureProviderConfigRepository/);
+    expect(src).toMatch(/SelectedAiParseTransport/);
+    expect(src).toMatch(/SecureManagedPilotRepository/);
     expect(src).not.toMatch(/EXPO_PUBLIC_AI_GATEWAY_URL/);
     expect(src).not.toMatch(/HttpAiParseTransport/);
   });
@@ -22,6 +24,8 @@ describe('production AI path contract (BYOK)', () => {
     );
     expect(src).toMatch(/SecureProviderConfigRepository/);
     expect(src).toMatch(/OpenAiCompatibleParseTransport/);
+    expect(src).toMatch(/SelectedAiParseTransport/);
+    expect(src).toMatch(/SecureManagedPilotRepository/);
     expect(src).not.toMatch(/EXPO_PUBLIC_AI_GATEWAY_URL/);
     expect(src).not.toMatch(/HttpAiParseTransport/);
   });

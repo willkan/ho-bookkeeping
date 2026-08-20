@@ -6,9 +6,9 @@ import {
   type ParseRequest,
   type ParseResponse,
 } from '@bookkeeping/contracts';
+import { buildParseUserContent, PARSE_SYSTEM_PROMPT } from '@bookkeeping/ai-parse-prompt';
 import type { ZodError } from 'zod';
 import { createOpenAiCompatibleClient, type OpenAiClientFactory } from './openai-client';
-import { buildParseUserContent, PARSE_SYSTEM_PROMPT } from './parse-prompt';
 import {
   assertCompleteProviderConfig,
   MissingProviderConfigError,

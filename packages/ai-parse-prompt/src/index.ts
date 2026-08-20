@@ -1,0 +1,103 @@
+import type { ParseRequest } from '@bookkeeping/contracts';
+
+/** One prompt shared by BYOK and the managed pilot; transport/auth differences do not change parse semantics. */
+export const PARSE_SYSTEM_PROMPT = [
+  'You extract flat peer consumption records from diary-like Chinese expense notes.',
+  'Respond with one JSON object only: {"records":[...]}. No markdown and no nested children or shopping groups.',
+  'Return zero, one, or many flat records. Money fields are integer minor units (fen), never floating point.',
+  'list_price_minor must equal actual_cost_minor + discount_minor.',
+  'For ordinary payment, actual_cost_minor is checkout payment. If no coupon is stated, discount_minor=0.',
+  '实付 X + 优惠券抵扣 Y means actual_cost_minor=X, discount_minor=Y, list_price_minor=X+Y.',
+  '原价 X + 优惠券抵扣 Y means list_price_minor=X, discount_minor=Y, actual_cost_minor=X-Y.',
+  'For C抵F vouchers, effective discount is F-C and actual_cost_minor is list_price_minor-F+C.',
+  'Never create coupon assets, coupon IDs, purchase records, balances, payment parts, or fallback values.',
+  'Copy request timezone onto every record. submitted_at in that timezone is the only reference clock.',
+  'Resolve every relative date (for example 昨天 and 前天) from submitted_at in request timezone.',
+  'Never use provider current time, request execution time, or response time for date resolution.',
+  'If the note has no explicit event date or time, set occurred_at to submitted_at and local_date to request local_date.',
+  'If a date has no clock time, retain the submitted_at local clock time. occurred_at and local_date must agree in timezone.',
+  'Derive local_date from occurred_at in the request timezone.',
+  'Prefer existing tag_candidates only when confident; otherwise propose a new tag.',
+  'Valid tag types are category and other. Category is the one exclusive consumption category.',
+  'Use other for trips, places, people, purposes, and channels. Merchant belongs only in merchant.',
+  'Treat 旅游 as a category for travel-related spending and specifically named contexts such as 江西旅游 as other.',
+  'Do not use an other tag instead of a category tag; attach both when both meanings are present.',
+  'Each record has direction, merchant, note, occurred_at, timezone, local_date, currency (CNY),',
+  'list_price_minor, actual_cost_minor, discount_minor, and tags.',
+  '',
+  'EXAMPLE INPUT:',
+  'raw_text: 午饭花了25元',
+  'submitted_at: 2026-07-16T04:00:00.000Z',
+  'timezone: Asia/Shanghai',
+  'local_date: 2026-07-16',
+  '',
+  'EXAMPLE JSON OUTPUT:',
+  JSON.stringify({
+    records: [
+      {
+        direction: 'expense',
+        merchant: null,
+        note: '午饭',
+        occurred_at: '2026-07-16T04:00:00.000Z',
+        timezone: 'Asia/Shanghai',
+        local_date: '2026-07-16',
+        currency: 'CNY',
+        list_price_minor: 2500,
+        actual_cost_minor: 2500,
+        discount_minor: 0,
+        tags: [{ name: '餐饮', type: 'category' }],
+      },
+    ],
+  }),
+  '',
+  'COUPON DISCOUNT EXAMPLE:',
+  JSON.stringify({
+    records: [
+      {
+        direction: 'expense',
+        merchant: null,
+        note: '买菜',
+        occurred_at: '2026-07-16T04:00:00.000Z',
+        timezone: 'Asia/Shanghai',
+        local_date: '2026-07-16',
+        currency: 'CNY',
+        list_price_minor: 32000,
+        actual_cost_minor: 30000,
+        discount_minor: 2000,
+        tags: [{ name: '买菜', type: 'category' }],
+      },
+    ],
+  }),
+  '',
+  'For a discounted voucher, face value reduces checkout but purchase cost remains part of current consumption cost.',
+  'raw_text: 661买菜。用了412抵500的券。',
+  'DISCOUNTED VOUCHER JSON OUTPUT:',
+  JSON.stringify({
+    records: [
+      {
+        direction: 'expense',
+        merchant: null,
+        note: '买菜',
+        occurred_at: '2026-07-16T04:00:00.000Z',
+        timezone: 'Asia/Shanghai',
+        local_date: '2026-07-16',
+        currency: 'CNY',
+        list_price_minor: 66100,
+        actual_cost_minor: 57300,
+        discount_minor: 8800,
+        tags: [{ name: '买菜', type: 'category' }],
+      },
+    ],
+  }),
+].join('\n');
+
+export function buildParseUserContent(request: ParseRequest): string {
+  return JSON.stringify({
+    raw_text: request.raw_text,
+    submitted_at: request.submitted_at,
+    timezone: request.timezone,
+    local_date: request.local_date,
+    mode_snapshot: request.mode_snapshot,
+    tag_candidates: request.tag_candidates,
+  });
+}

@@ -4,7 +4,7 @@ import {
   CONTRACT_VERSION,
 } from '@bookkeeping/contracts';
 import { describe, expect, it } from 'vitest';
-import { buildParseUserContent, PARSE_SYSTEM_PROMPT } from './parse-prompt';
+import { buildParseUserContent, PARSE_SYSTEM_PROMPT } from '@bookkeeping/ai-parse-prompt';
 
 /** Extract the first fenced or bare JSON object after EXAMPLE JSON OUTPUT. */
 function extractExampleJsonOutput(prompt: string): unknown {

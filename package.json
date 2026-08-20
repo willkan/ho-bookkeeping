@@ -4,14 +4,15 @@
   "version": "0.1.0",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "services/*"
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
-    "format": "prettier --write \"apps/**/*.{ts,tsx,js,json,md}\" \"packages/**/*.{ts,tsx,js,json,md}\" \"README.md\" \"package.json\"",
-    "format:check": "prettier --check \"apps/**/*.{ts,tsx,js,json,md}\" \"packages/**/*.{ts,tsx,js,json,md}\" \"README.md\" \"package.json\"",
+    "format": "prettier --write \"apps/**/*.{ts,tsx,js,json,md}\" \"packages/**/*.{ts,tsx,js,json,md}\" \"services/**/*.{ts,tsx,js,json,md}\" \"deploy/**/*.{yml,yaml,md}\" \"README.md\" \"package.json\"",
+    "format:check": "prettier --check \"apps/**/*.{ts,tsx,js,json,md}\" \"packages/**/*.{ts,tsx,js,json,md}\" \"services/**/*.{ts,tsx,js,json,md}\" \"deploy/**/*.{yml,yaml,md}\" \"README.md\" \"package.json\"",
     "doctor": "npm run doctor -w @bookkeeping/mobile",
     "export:ios": "npm run export:ios -w @bookkeeping/mobile",
     "export:android": "npm run export:android -w @bookkeeping/mobile"

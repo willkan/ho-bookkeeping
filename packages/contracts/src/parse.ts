@@ -108,17 +108,19 @@ export const ModeSnapshotSchema = z.object({
 });
 export type ModeSnapshot = z.infer<typeof ModeSnapshotSchema>;
 
-export const ParseRequestSchema = z.object({
-  contract_version: z.literal(CONTRACT_VERSION),
-  request_id: z.string().min(1).max(128),
-  raw_text: z.string().min(1).max(4000),
-  submitted_at: z.string().min(1),
-  timezone: z.string().min(1),
-  local_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  mode_snapshot: ModeSnapshotSchema,
-  /** Restricted local tag catalog for normalization suggestions — never the full ledger. */
-  tag_candidates: z.array(TagCandidateSchema).max(200),
-});
+export const ParseRequestSchema = z
+  .object({
+    contract_version: z.literal(CONTRACT_VERSION),
+    request_id: z.string().min(1).max(128),
+    raw_text: z.string().min(1).max(4000),
+    submitted_at: z.string().min(1),
+    timezone: z.string().min(1),
+    local_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    mode_snapshot: ModeSnapshotSchema,
+    /** Restricted local tag catalog for normalization suggestions — never the full ledger. */
+    tag_candidates: z.array(TagCandidateSchema).max(200),
+  })
+  .strict();
 export type ParseRequest = z.infer<typeof ParseRequestSchema>;
 
 export const ParseSuccessResponseSchema = z.object({

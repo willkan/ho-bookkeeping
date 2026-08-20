@@ -15,6 +15,7 @@
     "export:android": "npx expo export --platform android"
   },
   "dependencies": {
+    "@bookkeeping/ai-parse-prompt": "0.1.0",
     "@bookkeeping/contracts": "0.1.0",
     "@dr.pogodin/react-native-fs": "2.39.2",
     "@expo/vector-icons": "15.0.2",

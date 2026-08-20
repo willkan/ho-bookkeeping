@@ -2,6 +2,8 @@ import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
 import { LedgerService } from '../../application/ledger-service';
 import { OpenAiCompatibleParseTransport } from '../ai/transport';
+import { ManagedPilotParseTransport, SelectedAiParseTransport } from '../ai/managed-pilot';
+import { SecureManagedPilotRepository } from '../ai/secure-managed-pilot';
 import { SecureProviderConfigRepository } from '../ai/secure-provider-config';
 import { openAppDatabase } from '../db/open-app-database';
 import { LedgerRepository } from '../db/repositories';
@@ -44,7 +46,12 @@ export async function runBackgroundParseJobs(): Promise<number> {
   try {
     const repo = new LedgerRepository(db, ids);
     const store = new SecureProviderConfigRepository();
-    const transport = new OpenAiCompatibleParseTransport(store);
+    const pilotStore = new SecureManagedPilotRepository();
+    const transport = new SelectedAiParseTransport(
+      pilotStore,
+      new ManagedPilotParseTransport(pilotStore),
+      new OpenAiCompatibleParseTransport(store),
+    );
     const service = new LedgerService(repo, transport, ids);
     const runner = new ParseJobRunner(service);
     return await runner.resume();

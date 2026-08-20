@@ -1,6 +1,6 @@
 import { CONTRACT_VERSION } from '@bookkeeping/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PARSE_SYSTEM_PROMPT } from './parse-prompt';
+import { PARSE_SYSTEM_PROMPT } from '@bookkeeping/ai-parse-prompt';
 import { buildProviderConfigForSave } from './provider-config';
 import { MemoryProviderConfigStore } from './provider-config-store';
 import {

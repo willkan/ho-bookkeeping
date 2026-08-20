@@ -1,0 +1,9 @@
+.git
+.expo
+**/node_modules
+**/dist
+**/.env*
+**/data
+**/*.sqlite*
+apps/mobile/android
+apps/mobile/ios

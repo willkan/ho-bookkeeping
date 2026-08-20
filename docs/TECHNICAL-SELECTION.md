@@ -16,7 +16,7 @@
 - UI：React Native 原生组件 + 自建少量 design tokens / primitives；不引入整套 UI kit
 - 图表：`react-native-svg` + 小型纯函数统计/布局层；不引入重型 BI 图表框架
 - 后台解析：SQLite 持久化作业表 + 前台 worker + `expo-background-task` 补充调度
-- **AI 调用（一期确认）**：个人 BYOK — 客户端用官方 OpenAI JS/TS SDK 直接调用用户配置的**一个** OpenAI 兼容 Chat Completions 端点（如 DeepSeek）；**不**部署 Cloudflare AI 网关
+- **AI 调用（一期确认）**：正式长期路径是个人 BYOK；首批受邀用户可显式启用一个有 10 用户/30 天退出线的 managed-AI pilot。两者不是 fallback 链，pilot 结束必须升格新合同或整条删除
 - AI 模型：用户在设置中显式填写 model 字符串；模型名是运行配置，不进入账本合同；无自动 model fallback
 - **语音输入（一期确认）**：`react-native-sherpa-onnx@0.4.3` 负责 16 kHz PCM 麦克风流与 SenseVoiceSmall INT8 离线识别；Silero VAD 按 sherpa-onnx 官方参数对 PCM 分段，停顿后模拟流式返回稳定语段。当前 RN SDK 的 VAD 导出仍是占位实现，因此项目只补一个直接调用同版本 sherpa 原生 VAD 的薄桥；`expo-audio@57.0.2` 只复用跨端麦克风权限 API。模型首次使用时按需下载；不生成录音文件，不依赖系统语音识别或第三方云 ASR
 - 文件导出：客户端本地生成 `.xlsx`，写入 `expo-file-system` 后调用系统分享面板；具体 xlsx 库先做一个真机 spike 再冻结
@@ -84,9 +84,29 @@
 
 发送内容仍仅为单次解析最小上下文；不上传完整账本。
 
+### 2.4.1 Managed-AI pilot transport（限期部署边界）
+
+1. `packages/contracts` 的 `ParseRequest` / `ParseResponse` 仍是两种 transport 共用的唯一解析 DTO；本地 schema 与 `LedgerService` 状态机仍是唯一入账许可。
+2. `services/managed-ai-pilot` 是独立、可整体删除的 deployment adapter：Node.js + TypeScript、显式 SQL migration + SQLite、官方 OpenAI SDK Chat Completions JSON mode、Pino 结构化日志；不引入 ORM、账号框架、provider registry 或通用代理框架。
+3. pilot SQLite 只保存匿名主体、邀请码/凭证摘要、entitlement、请求状态、额度和 token/耗时等 usage 元数据，以及每个匿名主体最近一次三档付费意愿。它不得保存 `raw_text`、标签候选、完整请求体、金额、商户、自由反馈文本或完整模型输出。
+4. `/activate` 原子绑定邀请码与匿名 activation id，并签发只以摘要保存的短期 bearer token；`/parse` 只接受当前版本 `ParseRequest`；认证后的 `GET/PUT /feedback` 只读取/覆盖固定枚举且不扣解析额度；`/health` 只报告最小状态。
+5. 请求 reservation、幂等、撤销/过期、总量/日量、用户级/全局速率与并发检查在同一 SQLite 写事务内完成；成功上游响应通过共享 schema 后才完成用量扣减。服务重启后过期 reservation 显式标为失败，不静默重试上游。
+6. 上游 host、固定 model、timeout、token 上限和限流参数来自部署环境；客户端请求不能覆盖。entitlement 的环境变量只作为管理员颁发新邀请码时的默认值，`invites` 保存每码有效天数/总量/日量快照，激活事务从该快照创建 `entitlements`。上游 key 只在服务器 env/secret 中。
+7. 客户端若接入 pilot，必须在设置中显式选择并保存 pilot 凭证；失败时不自动回退 BYOK。真实联网 smoke 独立于本地账本默认 gate。
+8. Pilot 的单管理员运营面与移动端协议共用同一服务进程和 usage SQLite，但使用独立的服务端管理员 secret 鉴权。它只提供邀请码颁发/撤销、发放备注和 usage 对账 read model，不引入账号框架、远程数据库、第二套管理服务或账本查询能力。
+9. `invites.recipient_label` 是运营发放元数据；邀请码仍只保存摘要。`usage_requests` 保存 DeepSeek 返回的 prompt、completion、total、prompt cache hit/miss token，并通过 entitlement 的一对一 `invite_id ↔ subject_id` 关系聚合，不复制账目或 provider 输出。
+10. `/parse` 认证得到的匿名 `subject_id` 显式传入上游 adapter，作为 DeepSeek 顶层 `user_id`；该值只承担 provider 隔离语义。Pino 日志增加不透明 `invite_id` 与 cache token 字段，但禁止记录 recipient label、邀请码、activation id、原文或完整响应。
+11. `pilot_feedback` 以 `subject_id` 为唯一键，只保存 `willing | unsure | not_willing` 与时间戳。它是 pilot 运营事实，不进入 `packages/contracts` 的记账解析 DTO、不调用 provider、不写移动端 SQLite；管理员 read model 通过既有一对一邀请码关系展示和汇总，不新增账号、支付或分析系统。
+12. 邀请码级 entitlement 快照直接归属 `invites`，不是额外套餐、角色或 provider 层。管理员 API 只接受当前单一颁发合同：recipient label + days + total + daily；已有空快照列只在 migration v4 初始化时用当前部署默认值一次性回填，运行期不得以全局值隐式兜底。
+13. Pilot 的唯一正式发布路径是 GitHub Actions：对 main/PR 先运行 format/lint/typecheck/tests，再由仓库根 Dockerfile context 构建 `linux/amd64` 镜像并推送阿里云 ACR；生产部署只接受绑定 Git commit SHA 的不可变镜像标签。服务器不得继续从 source snapshot 现场 `npm ci` 或 `docker compose build`。
+14. 服务器 `/var/bookkeeping-managed-ai-pilot` 只持久化 Compose、`.release.env` 当前镜像引用、服务端 `.env` secret、SQLite/备份和 smoke 脚本。受限 `deploy` 用户只能通过 root-owned rollout 命令切换经过 registry 前缀与 SHA 标签校验的 pilot 镜像；rollout 失败必须恢复上一镜像引用。该命令不得读写 ho-extract 目录、Compose project、容器或 edge Nginx。
+15. Nginx、DNS 与证书属于共享 edge 的独立部署事实；普通 pilot 应用发布不得上传、覆盖或 reload edge 配置。只有域名/路由合同变化才走单独的 edge 变更流程。
+
+**新增理由与净熵**：新增服务只替代首批用户逐人配置供应商密钥的试验成本，并以单目录、单数据库、单 provider/model、单窄协议和明确删除日期收窄影响面。试验期内净熵暂时上升（存在两个显式 transport），由“10 用户/30 天后升格或整条删除”作为强制收敛门；禁止把 pilot 抽象成永久 provider 层或 fallback。
+
 ### 2.5 UI
 
-UI 只调用应用服务与配置用例，不直接拼 SQL 或散落调用模型。界面可先乐观展示“已记下”，但正式状态始终来自 SQLite。设置页提供 BYOK 表单（Endpoint / Key / Model / 保存 / 测试 / 掩码 / 清空）。
+UI 只调用应用服务与配置用例，不直接拼 SQL 或散落调用模型。界面可先乐观展示“已记下”，但正式状态始终来自 SQLite。设置页提供 BYOK 表单（Endpoint / Key / Model / 保存 / 测试 / 掩码 / 清空）和独立的内测付费意愿入口；后者通过窄 feedback port 调用 pilot，不进入账本服务或 AI parse transport。
 
 ### 2.6 语音识别适配（预输入）
 

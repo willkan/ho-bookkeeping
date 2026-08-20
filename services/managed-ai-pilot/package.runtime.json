@@ -1,0 +1,12 @@
+{
+  "name": "bookkeeping-managed-ai-pilot-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "better-sqlite3": "11.8.1",
+    "openai": "6.47.0",
+    "pino": "10.3.1",
+    "zod": "3.24.2"
+  }
+}

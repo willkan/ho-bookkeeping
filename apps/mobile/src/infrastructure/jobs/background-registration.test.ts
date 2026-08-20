@@ -32,6 +32,9 @@ describe('background scheduling registration result', () => {
     vi.doMock('../ai/secure-provider-config', () => ({
       SecureProviderConfigRepository: class {},
     }));
+    vi.doMock('../ai/secure-managed-pilot', () => ({
+      SecureManagedPilotRepository: class {},
+    }));
     vi.doMock('../ai/transport', () => ({
       OpenAiCompatibleParseTransport: class {},
     }));
@@ -44,6 +47,7 @@ describe('background scheduling registration result', () => {
     vi.doUnmock('../db/open-app-database');
     vi.doUnmock('../ids/expo-crypto-id-generator');
     vi.doUnmock('../ai/secure-provider-config');
+    vi.doUnmock('../ai/secure-managed-pilot');
     vi.doUnmock('../ai/transport');
     vi.resetModules();
   });
@@ -79,6 +83,9 @@ describe('background scheduling registration result', () => {
     vi.doMock('../ai/secure-provider-config', () => ({
       SecureProviderConfigRepository: class {},
     }));
+    vi.doMock('../ai/secure-managed-pilot', () => ({
+      SecureManagedPilotRepository: class {},
+    }));
     vi.doMock('../ai/transport', () => ({
       OpenAiCompatibleParseTransport: class {},
     }));
@@ -91,6 +98,7 @@ describe('background scheduling registration result', () => {
     vi.doUnmock('../db/open-app-database');
     vi.doUnmock('../ids/expo-crypto-id-generator');
     vi.doUnmock('../ai/secure-provider-config');
+    vi.doUnmock('../ai/secure-managed-pilot');
     vi.doUnmock('../ai/transport');
     vi.resetModules();
   });
@@ -124,6 +132,9 @@ describe('background scheduling registration result', () => {
     vi.doMock('../ai/secure-provider-config', () => ({
       SecureProviderConfigRepository: class {},
     }));
+    vi.doMock('../ai/secure-managed-pilot', () => ({
+      SecureManagedPilotRepository: class {},
+    }));
     vi.doMock('../ai/transport', () => ({
       OpenAiCompatibleParseTransport: class {},
     }));
@@ -136,6 +147,7 @@ describe('background scheduling registration result', () => {
     vi.doUnmock('../db/open-app-database');
     vi.doUnmock('../ids/expo-crypto-id-generator');
     vi.doUnmock('../ai/secure-provider-config');
+    vi.doUnmock('../ai/secure-managed-pilot');
     vi.doUnmock('../ai/transport');
     vi.resetModules();
   });

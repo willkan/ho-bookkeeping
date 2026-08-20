@@ -11,7 +11,8 @@ import { colors, spacing, typography } from '../../src/ui/tokens';
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const { ready, service, refresh, tick, configError, providerPublic } = useApp();
+  const { ready, service, refresh, tick, configError, providerPublic, managedPilotPublic } =
+    useApp();
   const router = useRouter();
   const settings = useMemo(() => {
     void tick;
@@ -36,6 +37,7 @@ export default function SettingsScreen() {
   }
 
   const current = mode ?? settings.confirmMode;
+  const pilotCredentialCurrent = managedPilotPublic?.accessTokenCurrent;
 
   const choose = (next: ConfirmMode) => {
     service.setConfirmMode(next);
@@ -67,9 +69,31 @@ export default function SettingsScreen() {
         <SectionLabel>智能整理</SectionLabel>
         <View style={styles.group}>
           <Menu
+            icon="ticket-outline"
+            title={
+              pilotCredentialCurrent
+                ? '托管 AI 内测已激活'
+                : managedPilotPublic
+                  ? '托管 AI 内测需重新激活'
+                  : '使用内测邀请码'
+            }
+            detail={
+              managedPilotPublic
+                ? `有效期至 ${new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(new Date(managedPilotPublic.entitlementExpiresAt))}`
+                : '受邀用户可免配密钥使用'
+            }
+            onPress={() => router.push('/managed-ai-pilot')}
+          />
+          <Menu
             icon="sparkles-outline"
-            title={configError ? '连接智能整理' : `已连接 ${providerPublic?.model ?? '智能整理'}`}
-            detail={configError ? '填写服务地址、密钥和模型' : '自动识别金额、商户和标签'}
+            title={providerPublic ? `自备密钥：${providerPublic.model}` : '配置自备 AI 密钥'}
+            detail={
+              managedPilotPublic
+                ? '退出内测后才会使用此配置'
+                : configError
+                  ? '填写服务地址、密钥和模型'
+                  : '自动识别金额、商户和标签'
+            }
             onPress={() => router.push('/ai-provider')}
           />
           <View style={styles.infoRow}>
@@ -123,6 +147,20 @@ export default function SettingsScreen() {
             title="导出账本"
             detail="导出为 Excel 文件"
             onPress={() => router.push('/export')}
+          />
+        </View>
+
+        <SectionLabel>支持与反馈</SectionLabel>
+        <View style={styles.group}>
+          <Menu
+            icon="heart-outline"
+            title="支持作者 · 付费意愿"
+            detail={
+              pilotCredentialCurrent
+                ? '匿名告诉我你是否愿意为正式版付费'
+                : '托管 AI 内测用户可提交匿名反馈'
+            }
+            onPress={() => router.push('/support-author')}
           />
         </View>
 
