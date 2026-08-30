@@ -10,7 +10,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.willkan.huana",
-      "buildNumber": "1"
+      "buildNumber": "3"
     },
     "android": {
       "blockedPermissions": [
