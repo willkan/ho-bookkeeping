@@ -220,6 +220,10 @@ src/infrastructure/speech/                    # 原生 import 与生产适配器
 - root/越狱设备可暴露本地密钥 — UI 必须有简短披露
 - 崩溃分析默认不附带账本字段或密钥；未来接入第三方诊断前需单独确认
 
+设备端用量诊断采用单一 `ai_usage_events` SQLite 表：transport 每次调用结束时从该请求的局部上下文原子发出 response 对应的 execution metadata，production composition 注入的 sink 负责写入；不再通过可变的“last execution meta”读取旁路关联请求。表中 token 字段可空，保存 request/model/host/config revision/时间/延迟/状态/错误分类，不保存 Prompt、原文、金额、商户、标签、密钥、凭证或完整输出。插入与“删除 90 天前记录 + 仅保留最新 2000 条”在同一事务内完成；普通账本导出与统计不得查询此表。用量写入失败只记安全日志，不反向改变 transport 或账本状态机结果。
+
+该表替代仅存在于进程内且可能跨并发请求串线的最近一次元数据旁路，并以有界持久化支持设备侧消耗分析；没有新增 provider fallback、业务事实源或导出协议，净熵降低。
+
 ### 6.1 Base URL 归一化约定
 
 保存时执行一次（见 PRD §2.0.3）：trim、去尾 `/`、绝对 URL 校验、非环回强制 HTTPS、不改写 path。

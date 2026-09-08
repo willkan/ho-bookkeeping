@@ -58,6 +58,30 @@ class FakeUpstream implements ParseUpstream {
 }
 
 describe('managed pilot parse API contract', () => {
+  it('returns safe token and latency metadata headers after a successful upstream parse', async () => {
+    const { post } = await setup();
+    const response = await post(parseRequest());
+    expect(Object.fromEntries(response.headers.entries())).toMatchObject({
+      'x-ai-provider-host': 'api.deepseek.com',
+      'x-ai-model': 'deepseek-chat',
+      'x-ai-latency-ms': '12',
+      'x-ai-prompt-tokens': '100',
+      'x-ai-completion-tokens': '30',
+      'x-ai-total-tokens': '130',
+      'x-ai-prompt-cache-hit-tokens': '64',
+      'x-ai-prompt-cache-miss-tokens': '36',
+    });
+  });
+
+  it('does not expose request content or full model output through usage metadata headers', async () => {
+    const { post } = await setup();
+    const response = await post(parseRequest());
+    const headers = JSON.stringify(Object.fromEntries(response.headers.entries()));
+    expect(headers).not.toContain('午饭花了25元');
+    expect(headers).not.toContain('午饭');
+    expect(headers).not.toContain('餐饮');
+    expect(headers).not.toContain('2500');
+  });
   const cleanups: (() => Promise<void> | void)[] = [];
   afterEach(async () => {
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup();

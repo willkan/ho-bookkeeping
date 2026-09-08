@@ -103,7 +103,7 @@ export function createPilotHttpServer(
             prompt_cache_miss_tokens: result.usage.promptCacheMissTokens,
             status: 'ok',
           });
-          return json(response, 200, result.response);
+          return json(response, 200, result.response, usageHeaders(config, result.usage));
         } catch (error) {
           const classified = asPilotError(error);
           store.fail(subjectId, parsed.data.request_id, classified.category, Date.now() - started);
@@ -221,15 +221,50 @@ async function readJson(request: IncomingMessage, maxBytes: number): Promise<unk
   }
 }
 
-function json(response: ServerResponse, status: number, body: unknown): void {
+function json(
+  response: ServerResponse,
+  status: number,
+  body: unknown,
+  extraHeaders: Record<string, string> = {},
+): void {
   const encoded = JSON.stringify(body);
   response.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
     'content-length': Buffer.byteLength(encoded),
     'cache-control': 'no-store',
     'x-content-type-options': 'nosniff',
+    ...extraHeaders,
   });
   response.end(encoded);
+}
+
+function usageHeaders(
+  config: PilotConfig,
+  usage: {
+    latencyMs: number;
+    promptTokens: number | null;
+    completionTokens: number | null;
+    totalTokens: number | null;
+    promptCacheHitTokens: number | null;
+    promptCacheMissTokens: number | null;
+  },
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    'x-ai-provider-host': config.upstreamHost,
+    'x-ai-model': config.upstreamModel,
+    'x-ai-latency-ms': String(usage.latencyMs),
+  };
+  const optional = {
+    'x-ai-prompt-tokens': usage.promptTokens,
+    'x-ai-completion-tokens': usage.completionTokens,
+    'x-ai-total-tokens': usage.totalTokens,
+    'x-ai-prompt-cache-hit-tokens': usage.promptCacheHitTokens,
+    'x-ai-prompt-cache-miss-tokens': usage.promptCacheMissTokens,
+  };
+  for (const [name, value] of Object.entries(optional)) {
+    if (value !== null) headers[name] = String(value);
+  }
+  return headers;
 }
 
 function asPilotError(error: unknown): PilotError {

@@ -8,7 +8,7 @@ import {
   type ManagedPilotCredential,
   type ManagedPilotStore,
 } from './managed-pilot';
-import type { AiParseTransportWithMeta, ParseExecutionMeta } from './transport';
+import type { AiParseTransport } from './transport';
 
 const future = '2099-01-01T00:00:00.000Z';
 
@@ -31,15 +31,12 @@ class MemoryPilotStore implements ManagedPilotStore {
   }
 }
 
-class StubTransport implements AiParseTransportWithMeta {
+class StubTransport implements AiParseTransport {
   calls = 0;
   constructor(
     private readonly response: ParseResponse,
-    private readonly meta: ParseExecutionMeta,
+    _legacyMeta?: unknown,
   ) {}
-  getLastExecutionMeta() {
-    return this.meta;
-  }
   async parse() {
     this.calls += 1;
     return this.response;
@@ -119,16 +116,36 @@ describe('managed AI pilot mobile transport', () => {
   it('uses and validates the pilot parse response when pilot is explicitly active', async () => {
     const store = new MemoryPilotStore();
     store.credential = credential();
+    const usageEvents: unknown[] = [];
     const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => {
       expect((init?.headers as Record<string, string>).authorization).toBe(
         `Bearer ${'t'.repeat(48)}`,
       );
-      return new Response(JSON.stringify(okResponse), { status: 200 });
+      return new Response(JSON.stringify(okResponse), {
+        status: 200,
+        headers: {
+          'x-ai-latency-ms': '12',
+          'x-ai-prompt-tokens': '100',
+          'x-ai-completion-tokens': '30',
+          'x-ai-total-tokens': '130',
+        },
+      });
     });
 
     await expect(
-      new ManagedPilotParseTransport(store, fetchImpl).parse(request()),
+      new ManagedPilotParseTransport(store, fetchImpl, (event) => usageEvents.push(event)).parse(
+        request(),
+      ),
     ).resolves.toEqual(okResponse);
+    expect(usageEvents).toEqual([
+      expect.objectContaining({
+        requestId: 'request_1',
+        latencyMs: 12,
+        promptTokens: 100,
+        completionTokens: 30,
+        totalTokens: 130,
+      }),
+    ]);
   });
 
   it('rejects malformed pilot responses through the shared parse response schema', async () => {

@@ -21,11 +21,7 @@ import type {
   TrendGranularity,
   TrendResult,
 } from '../domain/types';
-import type {
-  AiParseTransport,
-  AiParseTransportWithMeta,
-  ParseExecutionMeta,
-} from '../infrastructure/ai/transport';
+import type { AiParseTransport } from '../infrastructure/ai/transport';
 import type { LedgerRepository } from '../infrastructure/db/repositories';
 import type { IdGenerator } from './ports/id-generator';
 
@@ -50,18 +46,6 @@ export type LedgerProjection = {
   pending: LedgerPendingItem[];
   records: ConsumptionRecord[];
 };
-
-function jobMetaFrom(meta: ParseExecutionMeta | null): {
-  modelVersion: string | null;
-  providerHost: string | null;
-  configRevision: number | null;
-} {
-  return {
-    modelVersion: meta?.model ?? null,
-    providerHost: meta?.providerHost ?? null,
-    configRevision: meta?.configRevision ?? null,
-  };
-}
 
 export class LedgerService {
   constructor(
@@ -171,7 +155,6 @@ export class LedgerService {
       response = await this.transport.parse(request);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'transport failure';
-      this.persistTransportMeta(jobId, nowIso);
       this.repo.markJobFailed(jobId, nowIso, 'provider_error', message, true);
       this.repo.updateRawInputLifecycle(raw.id, 'parse_failed', nowIso, {
         parseErrorCategory: 'provider_error',
@@ -179,8 +162,6 @@ export class LedgerService {
       });
       return;
     }
-
-    const execMeta = this.persistTransportMeta(jobId, nowIso);
 
     // Reject mismatched request_id (out-of-order / wrong attachment).
     if (response.request_id !== claimed.clientRequestId) {
@@ -233,7 +214,7 @@ export class LedgerService {
         parseErrorMessage: '没有从这段原文中整理出消费记录，请重新整理',
         candidatesJson: '[]',
       });
-      this.repo.markJobSucceeded(jobId, nowIso, jobMetaFrom(execMeta));
+      this.repo.markJobSucceeded(jobId, nowIso);
       return;
     }
 
@@ -241,7 +222,7 @@ export class LedgerService {
       this.repo.updateRawInputLifecycle(raw.id, 'pending_confirm', nowIso, {
         candidatesJson: JSON.stringify(response.records),
       });
-      this.repo.markJobSucceeded(jobId, nowIso, jobMetaFrom(execMeta));
+      this.repo.markJobSucceeded(jobId, nowIso);
       return;
     }
 
@@ -251,22 +232,7 @@ export class LedgerService {
       now: nowIso,
       lifecycle: 'posted',
     });
-    this.repo.markJobSucceeded(jobId, nowIso, jobMetaFrom(execMeta));
-  }
-
-  private persistTransportMeta(jobId: string, nowIso: string): ParseExecutionMeta | null {
-    const transport = this.transport as AiParseTransportWithMeta;
-    if (typeof transport.getLastExecutionMeta !== 'function') {
-      return null;
-    }
-    const meta = transport.getLastExecutionMeta();
-    if (!meta) return null;
-    this.repo.recordJobExecutionMeta(jobId, nowIso, {
-      modelVersion: meta.model,
-      providerHost: meta.providerHost,
-      configRevision: meta.configRevision,
-    });
-    return meta;
+    this.repo.markJobSucceeded(jobId, nowIso);
   }
 
   /** Resume all eligible jobs (startup / foreground). */

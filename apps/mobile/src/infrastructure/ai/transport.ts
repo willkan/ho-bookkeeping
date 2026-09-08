@@ -7,7 +7,7 @@ import {
   type ParseResponse,
 } from '@bookkeeping/contracts';
 import { buildParseUserContent, PARSE_SYSTEM_PROMPT } from '@bookkeeping/ai-parse-prompt';
-import type { ZodError } from 'zod';
+import type { AiUsageEvent, AiUsageSink } from '../../domain/ai-usage';
 import { createOpenAiCompatibleClient, type OpenAiClientFactory } from './openai-client';
 import {
   assertCompleteProviderConfig,
@@ -31,72 +31,82 @@ export interface AiParseTransport {
   parse(request: ParseRequest): Promise<ParseResponse>;
 }
 
-/** Non-secret metadata captured for a parse attempt (never includes apiKey). */
-export type ParseExecutionMeta = {
-  providerHost: string;
-  model: string;
-  configRevision: number;
-};
-
-export type AiParseTransportWithMeta = AiParseTransport & {
-  /** Last successful config resolution meta (for job diagnostics). */
-  getLastExecutionMeta(): ParseExecutionMeta | null;
-};
-
 /**
  * Production BYOK path: secure config → OpenAI-compatible Chat Completions JSON mode
  * → local JSON parse → transport schema validation. Never synthesizes records.
  */
-export class OpenAiCompatibleParseTransport implements AiParseTransportWithMeta {
-  private lastMeta: ParseExecutionMeta | null = null;
-
+export class OpenAiCompatibleParseTransport implements AiParseTransport {
   constructor(
     private readonly configStore: ProviderConfigStore,
     private readonly clientFactory: OpenAiClientFactory = createOpenAiCompatibleClient,
+    private readonly usageSink?: AiUsageSink,
   ) {}
-
-  getLastExecutionMeta(): ParseExecutionMeta | null {
-    return this.lastMeta;
-  }
 
   async parse(request: ParseRequest): Promise<ParseResponse> {
     const body = ParseRequestSchema.parse(request);
+    const startedMs = Date.now();
+    const startedAt = new Date(startedMs).toISOString();
+    let providerHost: string | null = null;
+    let model: string | null = null;
+    let configRevision: number | null = null;
+    let usage = emptyTokenUsage();
+    const finish = (response: ParseResponse): ParseResponse => {
+      emitUsage(this.usageSink, {
+        requestId: body.request_id,
+        parseJobId: null,
+        attemptNumber: null,
+        transport: 'byok',
+        providerHost,
+        model,
+        configRevision,
+        contractVersion: body.contract_version,
+        startedAt,
+        completedAt: new Date().toISOString(),
+        latencyMs: Math.max(0, Date.now() - startedMs),
+        status: response.status === 'ok' ? 'succeeded' : 'failed',
+        errorCategory: response.status === 'error' ? response.error_category : null,
+        ...usage,
+      });
+      return response;
+    };
     let config: ProviderConfig | null;
     try {
       config = await this.configStore.load();
       assertCompleteProviderConfig(config);
     } catch (error) {
       if (error instanceof MissingProviderConfigError) {
-        return {
+        return finish({
           contract_version: body.contract_version,
           request_id: body.request_id,
           status: 'error',
           error_category: 'invalid_request',
           message: error.message,
-        };
+        });
       }
-      throw error;
+      return finish({
+        contract_version: body.contract_version,
+        request_id: body.request_id,
+        status: 'error',
+        error_category: 'provider_error',
+        message: 'AI 配置读取失败',
+      });
     }
 
-    this.lastMeta = {
-      providerHost: providerHostFromBaseUrl(config.baseUrl),
-      model: config.model,
-      configRevision: config.configRevision,
-    };
+    providerHost = providerHostFromBaseUrl(config.baseUrl);
+    model = config.model;
+    configRevision = config.configRevision;
 
     // Metadata only — never apiKey, raw text, amounts, merchants.
     console.info('[ai-transport] request', {
       request_id: body.request_id,
       contract_version: body.contract_version,
-      provider_host: this.lastMeta.providerHost,
-      model: this.lastMeta.model,
-      config_revision: this.lastMeta.configRevision,
+      provider_host: providerHost,
+      model,
+      config_revision: configRevision,
       tag_candidate_count: body.tag_candidates.length,
     });
 
     const client = this.clientFactory(config);
-    const started = Date.now();
-
     try {
       const completion = (await client.chat.completions.create({
         model: config.model,
@@ -110,6 +120,7 @@ export class OpenAiCompatibleParseTransport implements AiParseTransportWithMeta 
         choices?: { message?: { content?: string | null } }[];
         usage?: unknown;
       };
+      usage = normalizeTokenUsage(completion.usage);
 
       const content = completion.choices?.[0]?.message?.content;
       if (!content || !content.trim()) {
@@ -118,18 +129,18 @@ export class OpenAiCompatibleParseTransport implements AiParseTransportWithMeta 
           status: 'error',
           error_category: 'model_output_invalid',
           reason: 'empty_content',
-          latency_ms: Date.now() - started,
+          latency_ms: Date.now() - startedMs,
           model: config.model,
-          provider_host: this.lastMeta.providerHost,
-          usage: completion.usage ?? null,
+          provider_host: providerHost,
+          usage,
         });
-        return {
+        return finish({
           contract_version: body.contract_version,
           request_id: body.request_id,
           status: 'error',
           error_category: 'model_output_invalid',
           message: 'provider returned empty content',
-        };
+        });
       }
 
       let json: unknown;
@@ -141,17 +152,17 @@ export class OpenAiCompatibleParseTransport implements AiParseTransportWithMeta 
           status: 'error',
           error_category: 'model_output_invalid',
           reason: 'invalid_json',
-          latency_ms: Date.now() - started,
+          latency_ms: Date.now() - startedMs,
           model: config.model,
-          provider_host: this.lastMeta.providerHost,
+          provider_host: providerHost,
         });
-        return {
+        return finish({
           contract_version: body.contract_version,
           request_id: body.request_id,
           status: 'error',
           error_category: 'model_output_invalid',
           message: 'provider returned invalid JSON',
-        };
+        });
       }
 
       // Accept either full ParseSuccess shape or bare { records: [...] } from JSON mode.
@@ -171,14 +182,14 @@ export class OpenAiCompatibleParseTransport implements AiParseTransportWithMeta 
           status: 'error',
           error_category: 'model_output_invalid',
           reason: 'schema_failed',
-          latency_ms: Date.now() - started,
+          latency_ms: Date.now() - startedMs,
           model: config.model,
-          provider_host: this.lastMeta.providerHost,
+          provider_host: providerHost,
           // Paths/codes only — never raw model output, amounts, merchants, or keys.
           schema_issues: schemaIssues,
           schema_issue_count: success.error.issues.length,
         });
-        return {
+        return finish({
           contract_version: body.contract_version,
           request_id: body.request_id,
           status: 'error',
@@ -186,7 +197,7 @@ export class OpenAiCompatibleParseTransport implements AiParseTransportWithMeta 
           message: pathSummary
             ? `provider JSON failed transport schema (${pathSummary})`
             : 'provider JSON failed transport schema',
-        };
+        });
       }
 
       const contextIssuePaths = success.data.records.flatMap((record, index) =>
@@ -198,13 +209,13 @@ export class OpenAiCompatibleParseTransport implements AiParseTransportWithMeta 
           status: 'error',
           error_category: 'model_output_invalid',
           reason: 'request_context_failed',
-          latency_ms: Date.now() - started,
+          latency_ms: Date.now() - startedMs,
           model: config.model,
-          provider_host: this.lastMeta.providerHost,
+          provider_host: providerHost,
           context_issue_paths: contextIssuePaths.slice(0, MAX_SCHEMA_ISSUES_LOGGED),
           context_issue_count: contextIssuePaths.length,
         });
-        return {
+        return finish({
           contract_version: body.contract_version,
           request_id: body.request_id,
           status: 'error',
@@ -212,40 +223,87 @@ export class OpenAiCompatibleParseTransport implements AiParseTransportWithMeta 
           message: `provider JSON conflicts with request context (${contextIssuePaths
             .slice(0, 6)
             .join(', ')})`,
-        };
+        });
       }
 
       console.info('[ai-transport] response', {
         request_id: body.request_id,
         status: 'ok',
         record_count: success.data.records.length,
-        latency_ms: Date.now() - started,
+        latency_ms: Date.now() - startedMs,
         model: config.model,
-        provider_host: this.lastMeta.providerHost,
-        config_revision: this.lastMeta.configRevision,
-        usage: completion.usage ?? null,
+        provider_host: providerHost,
+        config_revision: configRevision,
+        usage,
       });
-      return success.data;
+      return finish(success.data);
     } catch (error) {
       const classified = classifyProviderError(error);
       console.info('[ai-transport] response', {
         request_id: body.request_id,
         status: 'error',
         error_category: classified.error_category,
-        latency_ms: Date.now() - started,
+        latency_ms: Date.now() - startedMs,
         model: config.model,
-        provider_host: this.lastMeta.providerHost,
+        provider_host: providerHost,
         error_name: error instanceof Error ? error.name : 'Error',
         // Never log error message if it might embed request headers/keys — use category only.
       });
-      return {
+      return finish({
         contract_version: body.contract_version,
         request_id: body.request_id,
         status: 'error',
         error_category: classified.error_category,
         message: classified.message,
-      };
+      });
     }
+  }
+}
+
+function emptyTokenUsage(): Pick<
+  AiUsageEvent,
+  | 'promptTokens'
+  | 'completionTokens'
+  | 'totalTokens'
+  | 'promptCacheHitTokens'
+  | 'promptCacheMissTokens'
+> {
+  return {
+    promptTokens: null,
+    completionTokens: null,
+    totalTokens: null,
+    promptCacheHitTokens: null,
+    promptCacheMissTokens: null,
+  };
+}
+
+function normalizeTokenUsage(value: unknown): ReturnType<typeof emptyTokenUsage> {
+  if (!value || typeof value !== 'object') return emptyTokenUsage();
+  const usage = value as Record<string, unknown>;
+  return {
+    promptTokens: tokenCount(usage.prompt_tokens),
+    completionTokens: tokenCount(usage.completion_tokens),
+    totalTokens: tokenCount(usage.total_tokens),
+    promptCacheHitTokens: tokenCount(usage.prompt_cache_hit_tokens),
+    promptCacheMissTokens: tokenCount(usage.prompt_cache_miss_tokens),
+  };
+}
+
+function tokenCount(value: unknown): number | null {
+  return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : null;
+}
+
+export function emitUsage(sink: AiUsageSink | undefined, event: AiUsageEvent): void {
+  if (!sink) return;
+  try {
+    sink(event);
+  } catch (error) {
+    console.info('[ai-usage] persist_failed', {
+      request_id: event.requestId,
+      status: event.status,
+      error_category: event.errorCategory,
+      error_name: error instanceof Error ? error.name : 'Error',
+    });
   }
 }
 
@@ -257,7 +315,9 @@ function extractRecordsArray(json: unknown): unknown {
 }
 
 /** Safe Zod issue metadata for logs/diagnostics — path + code only, no values/messages. */
-function summarizeZodIssues(error: ZodError): { path: string; code: string }[] {
+function summarizeZodIssues(error: {
+  issues: readonly { path: PropertyKey[]; code: string }[];
+}): { path: string; code: string }[] {
   return error.issues.slice(0, MAX_SCHEMA_ISSUES_LOGGED).map((issue) => ({
     path: issue.path.length > 0 ? issue.path.map(String).join('.') : '(root)',
     code: issue.code,

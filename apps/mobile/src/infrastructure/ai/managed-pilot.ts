@@ -5,7 +5,8 @@ import {
   type ParseResponse,
 } from '@bookkeeping/contracts';
 import { z } from 'zod';
-import type { AiParseTransportWithMeta, ParseExecutionMeta } from './transport';
+import type { AiUsageSink } from '../../domain/ai-usage';
+import { emitUsage, type AiParseTransport } from './transport';
 
 export const MANAGED_PILOT_BASE_URL = 'https://bookkeeping.holic.work' as const;
 export const MANAGED_PILOT_MODEL = 'deepseek-v4-flash' as const;
@@ -139,30 +140,52 @@ function activationFailure(status: number): ManagedPilotClientError {
   return new ManagedPilotClientError('激活失败，请稍后重试');
 }
 
-export class ManagedPilotParseTransport implements AiParseTransportWithMeta {
-  private lastMeta: ParseExecutionMeta | null = null;
-
+export class ManagedPilotParseTransport implements AiParseTransport {
   constructor(
     private readonly store: ManagedPilotStore,
     private readonly fetchImpl: Fetch = fetch,
+    private readonly usageSink?: AiUsageSink,
   ) {}
-
-  getLastExecutionMeta(): ParseExecutionMeta | null {
-    return this.lastMeta;
-  }
 
   async parse(request: ParseRequest): Promise<ParseResponse> {
     const body = ParseRequestSchema.parse(request);
-    const credential = await this.store.load();
-    if (!credential) return parseError(body, 'invalid_request', '尚未激活托管 AI 内测');
-    if (Date.parse(credential.accessTokenExpiresAt) <= Date.now()) {
-      return parseError(body, 'invalid_request', '内测访问凭证已过期，请重新激活');
-    }
-    this.lastMeta = {
-      providerHost: new URL(MANAGED_PILOT_BASE_URL).host,
-      model: MANAGED_PILOT_MODEL,
-      configRevision: 1,
+    const startedMs = Date.now();
+    const startedAt = new Date(startedMs).toISOString();
+    let responseHeaders: Headers | null = null;
+    const finish = (result: ParseResponse): ParseResponse => {
+      emitUsage(this.usageSink, {
+        requestId: body.request_id,
+        parseJobId: null,
+        attemptNumber: null,
+        transport: 'managed_pilot',
+        providerHost: new URL(MANAGED_PILOT_BASE_URL).host,
+        model: MANAGED_PILOT_MODEL,
+        configRevision: 1,
+        contractVersion: body.contract_version,
+        startedAt,
+        completedAt: new Date().toISOString(),
+        latencyMs:
+          safeHeaderInt(responseHeaders, 'x-ai-latency-ms') ?? Math.max(0, Date.now() - startedMs),
+        status: result.status === 'ok' ? 'succeeded' : 'failed',
+        errorCategory: result.status === 'error' ? result.error_category : null,
+        promptTokens: safeHeaderInt(responseHeaders, 'x-ai-prompt-tokens'),
+        completionTokens: safeHeaderInt(responseHeaders, 'x-ai-completion-tokens'),
+        totalTokens: safeHeaderInt(responseHeaders, 'x-ai-total-tokens'),
+        promptCacheHitTokens: safeHeaderInt(responseHeaders, 'x-ai-prompt-cache-hit-tokens'),
+        promptCacheMissTokens: safeHeaderInt(responseHeaders, 'x-ai-prompt-cache-miss-tokens'),
+      });
+      return result;
     };
+    let credential: ManagedPilotCredential | null;
+    try {
+      credential = await this.store.load();
+    } catch {
+      return finish(parseError(body, 'provider_error', '无法读取托管 AI 配置'));
+    }
+    if (!credential) return finish(parseError(body, 'invalid_request', '尚未激活托管 AI 内测'));
+    if (Date.parse(credential.accessTokenExpiresAt) <= Date.now()) {
+      return finish(parseError(body, 'invalid_request', '内测访问凭证已过期，请重新激活'));
+    }
     let response: Response;
     try {
       response = await this.fetchImpl(`${MANAGED_PILOT_BASE_URL}/parse`, {
@@ -175,15 +198,16 @@ export class ManagedPilotParseTransport implements AiParseTransportWithMeta {
         body: JSON.stringify(body),
       });
     } catch {
-      return parseError(body, 'provider_error', '托管 AI 服务暂时不可用');
+      return finish(parseError(body, 'provider_error', '托管 AI 服务暂时不可用'));
     }
-    if (!response.ok) return parseHttpError(body, response.status);
+    responseHeaders = response.headers;
+    if (!response.ok) return finish(parseHttpError(body, response.status));
 
     let raw: unknown;
     try {
       raw = await response.json();
     } catch {
-      return parseError(body, 'model_output_invalid', '托管 AI 返回了无效响应');
+      return finish(parseError(body, 'model_output_invalid', '托管 AI 返回了无效响应'));
     }
     const parsed = ParseResponseSchema.safeParse(raw);
     if (
@@ -191,30 +215,31 @@ export class ManagedPilotParseTransport implements AiParseTransportWithMeta {
       parsed.data.request_id !== body.request_id ||
       parsed.data.contract_version !== body.contract_version
     ) {
-      return parseError(body, 'model_output_invalid', '托管 AI 返回了无效响应');
+      return finish(parseError(body, 'model_output_invalid', '托管 AI 返回了无效响应'));
     }
-    return parsed.data;
+    return finish(parsed.data);
   }
 }
 
 /** Explicit selection: a saved pilot credential selects pilot; errors never fall back to BYOK. */
-export class SelectedAiParseTransport implements AiParseTransportWithMeta {
-  private selected: AiParseTransportWithMeta | null = null;
-
+export class SelectedAiParseTransport implements AiParseTransport {
   constructor(
     private readonly pilotStore: ManagedPilotStore,
-    private readonly pilot: AiParseTransportWithMeta,
-    private readonly byok: AiParseTransportWithMeta,
+    private readonly pilot: AiParseTransport,
+    private readonly byok: AiParseTransport,
   ) {}
 
-  getLastExecutionMeta(): ParseExecutionMeta | null {
-    return this.selected?.getLastExecutionMeta() ?? null;
-  }
-
   async parse(request: ParseRequest): Promise<ParseResponse> {
-    this.selected = (await this.pilotStore.load()) ? this.pilot : this.byok;
-    return this.selected.parse(request);
+    const selected = (await this.pilotStore.load()) ? this.pilot : this.byok;
+    return selected.parse(request);
   }
+}
+
+function safeHeaderInt(headers: Headers | null, name: string): number | null {
+  const raw = headers?.get(name);
+  if (raw === null || raw === undefined || !/^\d+$/.test(raw)) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : null;
 }
 
 function parseHttpError(request: ParseRequest, status: number): ParseResponse {

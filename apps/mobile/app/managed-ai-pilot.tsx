@@ -16,7 +16,8 @@ const ids = new ExpoCryptoIdGenerator();
 
 export default function ManagedAiPilotScreen() {
   const insets = useSafeAreaInsets();
-  const { ready, managedPilotStore, managedPilotPublic, reloadManagedPilot } = useApp();
+  const { ready, managedPilotStore, managedPilotPublic, reloadManagedPilot, aiUsageSink } =
+    useApp();
   const [inviteCode, setInviteCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -46,7 +47,11 @@ export default function ManagedAiPilotScreen() {
     setStatus(null);
     const now = new Date();
     try {
-      const result = await new ManagedPilotParseTransport(managedPilotStore).parse({
+      const result = await new ManagedPilotParseTransport(
+        managedPilotStore,
+        undefined,
+        aiUsageSink ?? undefined,
+      ).parse({
         contract_version: CONTRACT_VERSION,
         request_id: ids.createId('pilot_test'),
         raw_text: '测试连接：一瓶水3元',
@@ -69,7 +74,7 @@ export default function ManagedAiPilotScreen() {
     } finally {
       setBusy(false);
     }
-  }, [managedPilotStore]);
+  }, [aiUsageSink, managedPilotStore]);
 
   const leavePilot = useCallback(() => {
     Alert.alert(

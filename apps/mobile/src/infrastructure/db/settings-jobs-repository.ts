@@ -1,5 +1,4 @@
 import { CONTRACT_VERSION } from '@bookkeeping/contracts';
-import type { IdGenerator } from '../../application/ports/id-generator';
 import type {
   AppSettings,
   ConfirmMode,
@@ -9,15 +8,10 @@ import type {
   RawInput,
 } from '../../domain/types';
 import { mapParseJob, mapRawInput, type ParseJobRow, type RawInputRow } from './mappers';
-import type { SqliteDatabase } from './sqlite-database';
+import { AiUsageRepository } from './ai-usage-repository';
 
 /** Settings, raw inputs, and parse jobs over the single SQLite fact path. */
-export class SettingsJobsRepository {
-  constructor(
-    protected readonly db: SqliteDatabase,
-    protected readonly ids: IdGenerator,
-  ) {}
-
+export class SettingsJobsRepository extends AiUsageRepository {
   getSettings(): AppSettings {
     const confirm =
       this.db.get<{ value: string }>("SELECT value FROM app_settings WHERE key = 'confirm_mode'")
@@ -188,33 +182,6 @@ export class SettingsJobsRepository {
         meta?.modelVersion ?? null,
         meta?.providerHost ?? null,
         meta?.configRevision ?? null,
-        nowIso,
-        jobId,
-      ],
-    );
-  }
-
-  /** Record non-secret execution metadata without changing job status. */
-  recordJobExecutionMeta(
-    jobId: string,
-    nowIso: string,
-    meta: {
-      modelVersion?: string | null;
-      providerHost?: string | null;
-      configRevision?: number | null;
-    },
-  ): void {
-    this.db.run(
-      `UPDATE parse_jobs
-     SET model_version = COALESCE(?, model_version),
-         provider_host = COALESCE(?, provider_host),
-         config_revision = COALESCE(?, config_revision),
-         updated_at = ?
-     WHERE id = ?`,
-      [
-        meta.modelVersion ?? null,
-        meta.providerHost ?? null,
-        meta.configRevision ?? null,
         nowIso,
         jobId,
       ],

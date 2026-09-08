@@ -784,9 +784,11 @@ describe('ledger state machine / tracer bullet', () => {
     seedDefaults(db);
     const ids = new SequenceIdGenerator();
     const repo = new LedgerRepository(db, ids);
-    const transport = new OpenAiCompatibleParseTransport(store, () => ({
-      chat: { completions: { create } },
-    }));
+    const transport = new OpenAiCompatibleParseTransport(
+      store,
+      () => ({ chat: { completions: { create } } }),
+      (event) => repo.recordAiUsage(event),
+    );
     const service = new LedgerService(repo, transport, ids);
     const { rawInput, job } = await service.submitRawInput({
       rawText: '买xx花了100，买yy花了200，买zz花了20',
@@ -840,9 +842,11 @@ describe('ledger state machine / tracer bullet', () => {
     seedDefaults(db);
     const ids = new SequenceIdGenerator();
     const repo = new LedgerRepository(db, ids);
-    const transport = new OpenAiCompatibleParseTransport(store, () => ({
-      chat: { completions: { create } },
-    }));
+    const transport = new OpenAiCompatibleParseTransport(
+      store,
+      () => ({ chat: { completions: { create } } }),
+      (event) => repo.recordAiUsage(event),
+    );
     const service = new LedgerService(repo, transport, ids);
 
     const first = await service.submitRawInput({

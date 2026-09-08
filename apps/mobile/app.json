@@ -19,7 +19,7 @@
         "android.permission.WRITE_EXTERNAL_STORAGE"
       ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/app-icon.png",
+        "foregroundImage": "./assets/app-icon-foreground.png",
         "backgroundColor": "#F6FAF8"
       },
       "package": "com.willkan.huana",

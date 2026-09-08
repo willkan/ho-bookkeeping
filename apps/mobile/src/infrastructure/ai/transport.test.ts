@@ -128,9 +128,12 @@ describe('AI transport BYOK path', () => {
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
     });
 
-    const transport = new OpenAiCompatibleParseTransport(store, () => ({
-      chat: { completions: { create } },
-    }));
+    const usageEvents: unknown[] = [];
+    const transport = new OpenAiCompatibleParseTransport(
+      store,
+      () => ({ chat: { completions: { create } } }),
+      (event) => usageEvents.push(event),
+    );
 
     const result = await transport.parse(baseRequest);
     expect(result.status).toBe('ok');
@@ -151,10 +154,18 @@ describe('AI transport BYOK path', () => {
     expect(arg.messages[0]?.role).toBe('system');
     expect(arg.messages[0]?.content).toBe(PARSE_SYSTEM_PROMPT);
     expect(arg.messages[1]?.role).toBe('user');
-    const meta = transport.getLastExecutionMeta();
-    expect(meta?.providerHost).toBe('api.deepseek.com');
-    expect(meta?.model).toBe('deepseek-chat');
-    expect(meta?.configRevision).toBe(1);
+    expect(usageEvents).toEqual([
+      expect.objectContaining({
+        requestId: 'req_1',
+        providerHost: 'api.deepseek.com',
+        model: 'deepseek-chat',
+        configRevision: 1,
+        promptTokens: 1,
+        completionTokens: 1,
+        totalTokens: 2,
+        status: 'succeeded',
+      }),
+    ]);
   });
 
   // Negative: invalid JSON from provider fails visibly

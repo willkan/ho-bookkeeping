@@ -438,7 +438,7 @@ describe('sqlite migrations and repository integration', () => {
     const version = db.get<{ version: number }>(
       'SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1',
     );
-    expect(version?.version).toBe(10);
+    expect(version?.version).toBe(11);
     const settings = new LedgerRepository(db, new SequenceIdGenerator()).getSettings();
     expect(settings.confirmMode).toBe('auto_post');
     db.close();

@@ -43,8 +43,14 @@ async function saveProviderForm(
  */
 export default function AiProviderScreen() {
   const insets = useSafeAreaInsets();
-  const { ready, providerConfigStore, providerPublic, reloadProviderConfig, configError } =
-    useApp();
+  const {
+    ready,
+    providerConfigStore,
+    providerPublic,
+    reloadProviderConfig,
+    configError,
+    aiUsageSink,
+  } = useApp();
 
   const [baseUrl, setBaseUrl] = useState(DEFAULT_PROVIDER_BASE_URL);
   const [apiKey, setApiKey] = useState('');
@@ -137,7 +143,11 @@ export default function AiProviderScreen() {
         setStatus('请先保存配置，再测试连接');
         return;
       }
-      const transport = new OpenAiCompatibleParseTransport(providerConfigStore);
+      const transport = new OpenAiCompatibleParseTransport(
+        providerConfigStore,
+        undefined,
+        aiUsageSink ?? undefined,
+      );
       const result = await transport.parse({
         contract_version: CONTRACT_VERSION,
         request_id: `test_${Date.now()}`,
@@ -163,7 +173,7 @@ export default function AiProviderScreen() {
     } finally {
       setBusy(false);
     }
-  }, [keyDirty, providerConfigStore, providerPublic]);
+  }, [aiUsageSink, keyDirty, providerConfigStore, providerPublic]);
 
   if (!ready) {
     return (

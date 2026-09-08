@@ -9,6 +9,7 @@ import React, {
 } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { LedgerService } from './ledger-service';
+import type { AiUsageSink } from '../domain/ai-usage';
 import { OpenAiCompatibleParseTransport } from '../infrastructure/ai/transport';
 import {
   ManagedPilotParseTransport,
@@ -50,6 +51,7 @@ type AppContextValue = {
   service: LedgerService | null;
   providerConfigStore: ProviderConfigStore | null;
   managedPilotStore: ManagedPilotStore | null;
+  aiUsageSink: AiUsageSink | null;
   refresh: () => Promise<void>;
   /** Re-read secure BYOK config for UI warnings; transport already loads config per request. */
   reloadProviderConfig: () => Promise<void>;
@@ -67,6 +69,7 @@ const AppContext = createContext<AppContextValue>({
   service: null,
   providerConfigStore: null,
   managedPilotStore: null,
+  aiUsageSink: null,
   refresh: async () => undefined,
   reloadProviderConfig: async () => undefined,
   reloadManagedPilot: async () => undefined,
@@ -96,6 +99,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [service, setService] = useState<LedgerService | null>(null);
   const [providerConfigStore, setProviderConfigStore] = useState<ProviderConfigStore | null>(null);
   const [managedPilotStore, setManagedPilotStore] = useState<ManagedPilotStore | null>(null);
+  const [aiUsageSink, setAiUsageSink] = useState<AiUsageSink | null>(null);
   const [tick, setTick] = useState(0);
   const runnerRef = useRef<ParseJobRunner | null>(null);
   const configStoreRef = useRef<SecureProviderConfigRepository | null>(null);
@@ -125,12 +129,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const repo = new LedgerRepository(db, ids);
         const store = new SecureProviderConfigRepository();
         const pilotStore = new SecureManagedPilotRepository();
+        const usageSink: AiUsageSink = (event) => repo.recordAiUsage(event);
         configStoreRef.current = store;
         pilotStoreRef.current = pilotStore;
 
         // Selection is secure-store state. Pilot errors do not fall back to BYOK.
-        const byokTransport = new OpenAiCompatibleParseTransport(store);
-        const pilotTransport = new ManagedPilotParseTransport(pilotStore);
+        const byokTransport = new OpenAiCompatibleParseTransport(store, undefined, usageSink);
+        const pilotTransport = new ManagedPilotParseTransport(pilotStore, undefined, usageSink);
         const transport = new SelectedAiParseTransport(pilotStore, pilotTransport, byokTransport);
         const ledger = new LedgerService(repo, transport, ids);
         const runner = new ParseJobRunner(ledger);
@@ -147,6 +152,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setService(ledger);
           setProviderConfigStore(store);
           setManagedPilotStore(pilotStore);
+          setAiUsageSink(() => usageSink);
           setProviderPublic(pub);
           setManagedPilotPublic(pilot);
           setConfigError(pub || pilot ? null : new MissingProviderConfigError().message);
@@ -213,6 +219,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       service,
       providerConfigStore,
       managedPilotStore,
+      aiUsageSink,
       refresh,
       reloadProviderConfig,
       reloadManagedPilot,
@@ -228,6 +235,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       service,
       providerConfigStore,
       managedPilotStore,
+      aiUsageSink,
       refresh,
       reloadProviderConfig,
       reloadManagedPilot,

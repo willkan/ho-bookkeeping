@@ -439,6 +439,36 @@ WHERE lifecycle_status = 'posted'
   );
 `,
   },
+  {
+    version: 11,
+    sql: `
+-- Bounded device-side AI diagnostics. Never store prompts, raw ledger text, or model output.
+CREATE TABLE ai_usage_events (
+  id TEXT PRIMARY KEY NOT NULL,
+  request_id TEXT NOT NULL,
+  parse_job_id TEXT NULL,
+  attempt_number INTEGER NULL CHECK (attempt_number IS NULL OR attempt_number >= 1),
+  transport TEXT NOT NULL CHECK (transport IN ('byok', 'managed_pilot', 'unconfigured', 'fake')),
+  provider_host TEXT NULL,
+  model TEXT NULL,
+  config_revision INTEGER NULL CHECK (config_revision IS NULL OR config_revision >= 1),
+  contract_version TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  completed_at TEXT NOT NULL,
+  latency_ms INTEGER NOT NULL CHECK (latency_ms >= 0),
+  status TEXT NOT NULL CHECK (status IN ('succeeded', 'failed')),
+  error_category TEXT NULL,
+  prompt_tokens INTEGER NULL CHECK (prompt_tokens IS NULL OR prompt_tokens >= 0),
+  completion_tokens INTEGER NULL CHECK (completion_tokens IS NULL OR completion_tokens >= 0),
+  total_tokens INTEGER NULL CHECK (total_tokens IS NULL OR total_tokens >= 0),
+  prompt_cache_hit_tokens INTEGER NULL CHECK (prompt_cache_hit_tokens IS NULL OR prompt_cache_hit_tokens >= 0),
+  prompt_cache_miss_tokens INTEGER NULL CHECK (prompt_cache_miss_tokens IS NULL OR prompt_cache_miss_tokens >= 0),
+  FOREIGN KEY (parse_job_id) REFERENCES parse_jobs(id)
+);
+CREATE INDEX idx_ai_usage_events_started ON ai_usage_events(started_at DESC, id DESC);
+CREATE INDEX idx_ai_usage_events_request ON ai_usage_events(request_id);
+`,
+  },
 ];
 
 export function migrate(db: SqliteDatabase): void {

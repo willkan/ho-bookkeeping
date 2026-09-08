@@ -47,10 +47,12 @@ export async function runBackgroundParseJobs(): Promise<number> {
     const repo = new LedgerRepository(db, ids);
     const store = new SecureProviderConfigRepository();
     const pilotStore = new SecureManagedPilotRepository();
+    const usageSink = (event: Parameters<LedgerRepository['recordAiUsage']>[0]) =>
+      repo.recordAiUsage(event);
     const transport = new SelectedAiParseTransport(
       pilotStore,
-      new ManagedPilotParseTransport(pilotStore),
-      new OpenAiCompatibleParseTransport(store),
+      new ManagedPilotParseTransport(pilotStore, undefined, usageSink),
+      new OpenAiCompatibleParseTransport(store, undefined, usageSink),
     );
     const service = new LedgerService(repo, transport, ids);
     const runner = new ParseJobRunner(service);
