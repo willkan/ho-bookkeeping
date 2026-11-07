@@ -469,6 +469,21 @@ CREATE INDEX idx_ai_usage_events_started ON ai_usage_events(started_at DESC, id 
 CREATE INDEX idx_ai_usage_events_request ON ai_usage_events(request_id);
 `,
   },
+  {
+    version: 12,
+    sql: `
+CREATE TABLE monthly_budgets (
+  id TEXT PRIMARY KEY NOT NULL,
+  amount_minor INTEGER NOT NULL
+    CHECK (typeof(amount_minor) = 'integer' AND amount_minor BETWEEN 1 AND 99999999999),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT NULL
+);
+CREATE UNIQUE INDEX idx_monthly_budget_active
+  ON monthly_budgets ((1)) WHERE deleted_at IS NULL;
+`,
+  },
 ];
 
 export function migrate(db: SqliteDatabase): void {

@@ -36,7 +36,7 @@ export function SpeechModelDownloadModal({
             <View style={styles.titleCopy}>
               <Text style={typography.headline}>启用离线语音</Text>
               <Text style={typography.secondary}>
-                首次下载约 240 MB，之后无需联网；停顿或松手后，语音会在本机转成文字。
+                首次下载约 240 MB（VAD 已内置），之后无需联网；停顿或松手后，语音会在本机转成文字。
               </Text>
             </View>
           </View>
@@ -45,7 +45,7 @@ export function SpeechModelDownloadModal({
           <SourceOption
             selected={source === 'domestic'}
             title="国内加速"
-            detail="hf-mirror.com"
+            detail="modelscope.cn"
             onPress={() => setSource('domestic')}
             disabled={downloading}
           />
@@ -74,7 +74,8 @@ export function SpeechModelDownloadModal({
           ) : null}
 
           <Text style={styles.footnote}>
-            两条线路下载同一个锁定模型，App 会校验文件；失败不会自动切换线路。
+            两条线路下载同一个锁定模型，VAD 已随 App 内置；App
+            会校验下载文件，失败不会自动切换线路。
           </Text>
           <PrimaryButton
             label={

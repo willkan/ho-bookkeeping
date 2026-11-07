@@ -48,8 +48,47 @@ describe('managed pilot feedback HTTP contract', () => {
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
-    return { activation, db, logs: () => logs, request };
+    const anonymous = (
+      method: 'GET' | 'PUT',
+      body?: unknown,
+      token = `feedback_${'a'.repeat(64)}`,
+    ) =>
+      fetch(`http://127.0.0.1:${address.port}/anonymous-feedback`, {
+        method,
+        headers: {
+          authorization: `Bearer ${token}`,
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+    return { activation, db, logs: () => logs, request, anonymous, store };
   }
+
+  it('accepts and updates feedback without an AI activation', async () => {
+    const { anonymous, db, store, logs } = await setup();
+    expect(await (await anonymous('GET')).json()).toMatchObject({ willingness: null });
+    expect((await anonymous('PUT', { willingness: 'willing' })).status).toBe(200);
+    expect((await anonymous('PUT', { willingness: 'unsure' })).status).toBe(200);
+    expect(await (await anonymous('GET')).json()).toMatchObject({ willingness: 'unsure' });
+    const other = `feedback_${'b'.repeat(64)}`;
+    expect(await (await anonymous('GET', undefined, other)).json()).toMatchObject({
+      willingness: null,
+    });
+    expect((await anonymous('PUT', { willingness: 'not_willing' }, other)).status).toBe(200);
+    expect(store.anonymousFeedbackCounts()).toEqual({ willing: 0, unsure: 1, not_willing: 1 });
+    expect(db.prepare('SELECT COUNT(*) count FROM usage_requests').get()).toEqual({ count: 0 });
+    expect(logs()).not.toContain(`feedback_${'a'.repeat(64)}`);
+    expect(logs()).not.toContain('unsure');
+  });
+
+  it('rejects malformed credentials and disallowed answers', async () => {
+    const { anonymous } = await setup();
+    expect((await anonymous('GET', undefined, 'bad')).status).toBe(401);
+    expect((await anonymous('PUT', { willingness: 'other' })).status).toBe(400);
+    expect((await anonymous('PUT', { willingness: 'willing', comment: 'private' })).status).toBe(
+      400,
+    );
+  });
 
   it('requires a current pilot bearer credential for reads and writes', async () => {
     const { request } = await setup();

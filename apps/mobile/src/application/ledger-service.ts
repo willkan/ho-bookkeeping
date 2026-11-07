@@ -24,6 +24,7 @@ import type {
 import type { AiParseTransport } from '../infrastructure/ai/transport';
 import type { LedgerRepository } from '../infrastructure/db/repositories';
 import type { IdGenerator } from './ports/id-generator';
+import { parseWeChatCsv } from './wechat-csv';
 
 export type SubmitRawInputCommand = {
   rawText: string;
@@ -53,6 +54,21 @@ export class LedgerService {
     private readonly transport: AiParseTransport,
     private readonly ids: IdGenerator,
   ) {}
+
+  importWeChatCsv(text: string, fileHash: string): number {
+    if (!/^[a-f0-9]{64}$/.test(fileHash)) throw new Error('文件校验值无效');
+    const rows = parseWeChatCsv(text);
+    const now = new Date().toISOString();
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date(now));
+    const get = (type: string) => parts.find((part) => part.type === type)?.value;
+    const importLocalDate = `${get('year')}-${get('month')}-${get('day')}`;
+    return this.repo.importWeChatCsv({ fileHash, rows, now, importLocalDate });
+  }
 
   getSettings() {
     return this.repo.getSettings();

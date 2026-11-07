@@ -154,12 +154,8 @@ export default function SettingsScreen() {
         <View style={styles.group}>
           <Menu
             icon="heart-outline"
-            title="支持作者 · 付费意愿"
-            detail={
-              pilotCredentialCurrent
-                ? '匿名告诉我你是否愿意为正式版付费'
-                : '托管 AI 内测用户可提交匿名反馈'
-            }
+            title="意见反馈"
+            detail="告诉我们你的想法"
             onPress={() => router.push('/support-author')}
           />
         </View>

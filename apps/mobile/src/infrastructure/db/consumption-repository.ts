@@ -2,12 +2,92 @@ import type { CandidateRecord } from '@bookkeeping/contracts';
 import type { ConsumptionRecord, LifecycleStatus, TagSource } from '../../domain/types';
 import { mapConsumption, type ConsumptionRow } from './mappers';
 import { TagModeRepository } from './tag-mode-repository';
+import type { WeChatCsvRecord } from '../../application/wechat-csv';
 
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, '\\$&');
 }
 
 export class ConsumptionRepository extends TagModeRepository {
+  /** One atomic posting of a locally validated, already classified CSV. */
+  importWeChatCsv(input: {
+    fileHash: string;
+    rows: WeChatCsvRecord[];
+    now: string;
+    importLocalDate: string;
+  }): number {
+    return this.db.withTransaction(() => {
+      const rawId = (index: number) => `ri_wc_${input.fileHash}_${index}`;
+      const existing = input.rows.reduce(
+        (count, _, index) =>
+          count +
+          Number(
+            Boolean(
+              this.db.get<{ id: string }>('SELECT id FROM raw_inputs WHERE id = ?', [rawId(index)]),
+            ),
+          ),
+        0,
+      );
+      if (existing === input.rows.length) return 0;
+      if (existing !== 0) throw new Error('此文件曾部分导入，账本未改动');
+      const dates = input.rows.map((row) => row.localDate).sort();
+      const overlap =
+        this.db.get<{ count: number }>(
+          `SELECT COUNT(*) AS count FROM consumption_records
+         WHERE deleted_at IS NULL AND local_date BETWEEN ? AND ?`,
+          [dates[0], dates[dates.length - 1]],
+        )?.count ?? 0;
+      if (overlap > 0) throw new Error('导入日期范围已有账单，请先核对重复记录');
+
+      input.rows.forEach((row, index) => {
+        const id = rawId(index);
+        const recordId = `cr_wc_${input.fileHash}_${index}`;
+        const tag = this.ensureTag({
+          id: this.ids.createId('tag'),
+          type: 'category',
+          name: row.category,
+          now: input.now,
+        });
+        this.db.run(
+          `INSERT INTO raw_inputs (
+            id, raw_text, submitted_at, timezone, local_date, lifecycle_status, confirm_mode,
+            mode_id_snapshot, mode_name_snapshot, default_tags_snapshot_json,
+            include_in_mode_stats, parse_error_category, parse_error_message,
+            candidates_json, created_at, updated_at, deleted_at
+          ) VALUES (?, ?, ?, 'Asia/Shanghai', ?, 'posted', 'auto_post',
+            NULL, NULL, '[]', 0, NULL, NULL, NULL, ?, ?, NULL)`,
+          [id, row.sourceText, input.now, input.importLocalDate, input.now, input.now],
+        );
+        this.db.run(
+          `INSERT INTO consumption_records (
+            id, raw_input_id, source_sequence, direction, merchant, note, occurred_at,
+            timezone, local_date, currency, list_price_minor, actual_cost_minor,
+            discount_minor, mode_id, include_in_mode_stats, manually_edited,
+            created_at, updated_at, deleted_at
+          ) VALUES (?, ?, 0, 'expense', NULL, ?, ?, 'Asia/Shanghai', ?, 'CNY',
+            ?, ?, 0, NULL, 0, 1, ?, ?, NULL)`,
+          [
+            recordId,
+            id,
+            row.note,
+            row.occurredAt,
+            row.localDate,
+            row.amountMinor,
+            row.amountMinor,
+            input.now,
+            input.now,
+          ],
+        );
+        this.db.run(
+          `INSERT INTO consumption_record_tags (consumption_record_id, tag_id, source)
+           VALUES (?, ?, 'manual')`,
+          [recordId, tag.id],
+        );
+      });
+      return input.rows.length;
+    });
+  }
+
   listEffectiveConsumptionRecords(): ConsumptionRecord[] {
     return this.db
       .all<ConsumptionRow>(

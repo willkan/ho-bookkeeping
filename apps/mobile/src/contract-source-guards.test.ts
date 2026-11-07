@@ -127,6 +127,8 @@ describe('app source contract guards', () => {
     expect(record).not.toContain('new SherpaStreamingSpeech');
     expect(settings).not.toContain('new SpeechModelManager');
     expect(runtime).not.toContain('InteractionManager.runAfterInteractions');
+    expect(runtime).toContain('if (!modelReady) return;');
     expect(runtime).toContain('speech.prepare()');
+    expect(runtime).toContain("if (state === 'active') prepare();");
   });
 });

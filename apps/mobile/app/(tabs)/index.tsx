@@ -4,7 +4,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AccessibilityInfo,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   Vibration,
@@ -25,6 +28,7 @@ import {
   SectionLabel,
 } from '../../src/ui/primitives';
 import { SpeechModelDownloadModal } from '../../src/ui/speech-model-download-modal';
+import { MonthlyBudgetPanel } from '../../src/ui/monthly-budget-panel';
 import { colors, radius, spacing, typography } from '../../src/ui/tokens';
 
 function todayLocalDate(): string {
@@ -175,11 +179,9 @@ export default function RecordScreen() {
   const voiceActionLabel =
     voice.state.phase === 'streaming'
       ? '正在听，松开结束'
-      : voice.state.phase === 'requesting_permission'
-        ? '正在准备…'
-        : voice.state.phase === 'finalizing'
-          ? '正在完成识别…'
-          : '按住说话';
+      : voice.state.phase === 'finalizing'
+        ? '正在完成识别…'
+        : '按住说话';
   const showVoiceMessage = Boolean(voice.state.error || voice.state.notice);
 
   return (
@@ -191,112 +193,140 @@ export default function RecordScreen() {
         </Pressable>
       </View>
 
-      <SectionLabel>当前模式</SectionLabel>
-      <Pressable
-        style={styles.modeCard}
-        onPress={() => router.push('/modes')}
-        accessibilityLabel={`选择模式，当前${activeMode?.name ?? '未启用'}`}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <Text style={typography.body}>{activeMode?.name ?? '未启用模式'}</Text>
-        <Text style={typography.secondary}>›</Text>
-      </Pressable>
-
-      {activeMode ? (
-        <View style={styles.tagRow}>
-          {(skipMode ? [] : defaultTags)
-            .filter((t) => !t.tagId || !disabledTagIds.has(t.tagId))
-            .map((t) => (
-              <Chip
-                key={`${t.tagId}-${t.name}`}
-                label={t.name}
-                onClose={() => {
-                  if (t.tagId) {
-                    setDisabledTagIds((prev) => new Set(prev).add(t.tagId!));
-                  }
-                }}
-              />
-            ))}
-          <Pressable onPress={() => setSkipMode((v) => !v)} accessibilityLabel="本笔跳出模式">
-            <Text style={[styles.escape, skipMode && styles.escapeOn]}>
-              {skipMode ? '已跳出模式' : '本笔跳出模式'}
-            </Text>
-          </Pressable>
-        </View>
-      ) : null}
-
-      <View style={styles.composer}>
-        <Field
-          multiline
-          value={voice.displayValue}
-          onChangeText={onChangeText}
-          editable={!voice.editingDisabled}
-          placeholder="用自然语言记一笔，例如：买xx花了100，买yy花了200"
-          accessibilityLabel="自然语言输入"
-          style={styles.inputField}
-        />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={
-            screenReaderEnabled
-              ? voice.micToggleAccessibilityLabel
-              : voice.micHoldAccessibilityLabel
-          }
-          accessibilityState={{
-            busy: voice.isBusy,
-            selected: voice.isRecording,
-          }}
-          onPress={screenReaderEnabled ? onAccessibleMicPress : undefined}
-          onPressIn={screenReaderEnabled ? undefined : onMicPress}
-          onPressOut={screenReaderEnabled ? undefined : onMicRelease}
-          style={({ pressed }) => [
-            styles.micButton,
-            voice.isRecording && styles.micButtonActive,
-            voice.isBusy && styles.micButtonBusy,
-            pressed && styles.micPressed,
-          ]}
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: spacing.xl }}
         >
-          <Ionicons
-            name={voice.isRecording ? 'stop-circle' : voice.isBusy ? 'hourglass-outline' : 'mic'}
-            size={24}
-            color={voice.isRecording ? colors.white : colors.accent}
+          <MonthlyBudgetPanel
+            variant="home"
+            onOpenOverview={() =>
+              router.push({
+                pathname: '/ledger',
+                params: { budgetOverview: String(Date.now()) },
+              })
+            }
           />
-          <Text style={[styles.micButtonLabel, voice.isRecording && styles.micButtonLabelActive]}>
-            {voiceActionLabel}
-          </Text>
-        </Pressable>
-      </View>
+          <SectionLabel>当前模式</SectionLabel>
+          <Pressable
+            style={styles.modeCard}
+            onPress={() => router.push('/modes')}
+            accessibilityLabel={`选择模式，当前${activeMode?.name ?? '未启用'}`}
+          >
+            <Text style={typography.body}>{activeMode?.name ?? '未启用模式'}</Text>
+            <Text style={typography.secondary}>›</Text>
+          </Pressable>
 
-      {showVoiceMessage && voice.statusMessage ? (
-        <Text
-          style={[styles.voiceStatus, voice.state.error ? styles.voiceError : null]}
-          accessibilityRole={voice.state.error ? 'alert' : 'text'}
-          accessibilityLiveRegion="polite"
-        >
-          {voice.statusMessage}
-        </Text>
-      ) : null}
+          {activeMode ? (
+            <View style={styles.tagRow}>
+              {(skipMode ? [] : defaultTags)
+                .filter((t) => !t.tagId || !disabledTagIds.has(t.tagId))
+                .map((t) => (
+                  <Chip
+                    key={`${t.tagId}-${t.name}`}
+                    label={t.name}
+                    onClose={() => {
+                      if (t.tagId) {
+                        setDisabledTagIds((prev) => new Set(prev).add(t.tagId!));
+                      }
+                    }}
+                  />
+                ))}
+              <Pressable onPress={() => setSkipMode((v) => !v)} accessibilityLabel="本笔跳出模式">
+                <Text style={[styles.escape, skipMode && styles.escapeOn]}>
+                  {skipMode ? '已跳出模式' : '本笔跳出模式'}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
 
-      <Text style={styles.disclosure}>{voice.disclosure}</Text>
-      {savedNotice ? (
-        <Text style={styles.savedNotice} accessibilityLiveRegion="polite">
-          已保存，正在整理
-        </Text>
-      ) : null}
-      {configError ? (
-        <Text style={styles.configError} accessibilityRole="alert">
-          AI 未配置：{configError}
-        </Text>
-      ) : null}
+          <View style={styles.composer}>
+            <Field
+              multiline
+              value={voice.displayValue}
+              onChangeText={onChangeText}
+              editable={!voice.editingDisabled}
+              placeholder="用自然语言记一笔，例如：买xx花了100，买yy花了200"
+              accessibilityLabel="自然语言输入"
+              style={styles.inputField}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                screenReaderEnabled
+                  ? voice.micToggleAccessibilityLabel
+                  : voice.micHoldAccessibilityLabel
+              }
+              accessibilityState={{
+                busy: voice.isBusy,
+                selected: voice.isRecording,
+              }}
+              onPress={screenReaderEnabled ? onAccessibleMicPress : undefined}
+              onPressIn={screenReaderEnabled ? undefined : onMicPress}
+              onPressOut={screenReaderEnabled ? undefined : onMicRelease}
+              style={({ pressed }) => [
+                styles.micButton,
+                voice.isRecording && styles.micButtonActive,
+                voice.isBusy && styles.micButtonBusy,
+                pressed && styles.micPressed,
+              ]}
+            >
+              <Ionicons
+                name={
+                  voice.isRecording
+                    ? 'stop-circle'
+                    : voice.state.phase === 'finalizing'
+                      ? 'hourglass-outline'
+                      : 'mic'
+                }
+                size={24}
+                color={voice.isRecording ? colors.white : colors.accent}
+              />
+              <Text
+                style={[styles.micButtonLabel, voice.isRecording && styles.micButtonLabelActive]}
+              >
+                {voiceActionLabel}
+              </Text>
+            </Pressable>
+          </View>
 
-      <PrimaryButton
-        label={saving ? '保存中…' : '记下来'}
-        onPress={() => void onSave()}
-        disabled={saving || voice.editingDisabled || !voice.displayValue.trim()}
-      />
+          {showVoiceMessage && voice.statusMessage ? (
+            <Text
+              style={[styles.voiceStatus, voice.state.error ? styles.voiceError : null]}
+              accessibilityRole={voice.state.error ? 'alert' : 'text'}
+              accessibilityLiveRegion="polite"
+            >
+              {voice.statusMessage}
+            </Text>
+          ) : null}
 
-      <Link href="/settings" style={styles.settingsLink}>
-        <Text style={styles.link}>设置入账方式</Text>
-      </Link>
+          <Text style={styles.disclosure}>{voice.disclosure}</Text>
+          {savedNotice ? (
+            <Text style={styles.savedNotice} accessibilityLiveRegion="polite">
+              已保存，正在整理
+            </Text>
+          ) : null}
+          {configError ? (
+            <Text style={styles.configError} accessibilityRole="alert">
+              AI 未配置：{configError}
+            </Text>
+          ) : null}
+
+          <PrimaryButton
+            label={saving ? '保存中…' : '记下来'}
+            onPress={() => void onSave()}
+            disabled={saving || voice.editingDisabled || !voice.displayValue.trim()}
+          />
+
+          <Link href="/settings" style={styles.settingsLink}>
+            <Text style={styles.link}>设置入账方式</Text>
+          </Link>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       <SpeechModelDownloadModal
         visible={showSpeechModel}

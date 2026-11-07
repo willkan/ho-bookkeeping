@@ -1,5 +1,6 @@
 import {
   DocumentDirectoryPath,
+  copyFile,
   downloadFile,
   exists,
   getFSInfo,
@@ -12,9 +13,12 @@ import {
   unlink,
   writeFile,
 } from '@dr.pogodin/react-native-fs';
+import { Asset } from 'expo-asset';
+import bundledSileroVadAsset from '../../../assets/silero_vad.onnx';
 import type { SpeechModelArtifactsPort } from '../../application/ports/speech-model-artifacts';
 import {
   SENSE_VOICE_VAD_MODEL,
+  SILERO_VAD_FILE,
   getSpeechModelDownloadUrl,
   getSpeechModelRuntimeRelativePath,
   SPEECH_MODEL_RUNTIME_DIRS,
@@ -33,6 +37,7 @@ const LEGACY_MODEL_IDS = [
   'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09',
 ] as const;
 const READY_MARKER = '.ready.json';
+const LEGACY_READY_MANIFEST_FILES = [...SENSE_VOICE_VAD_MODEL.files, SILERO_VAD_FILE];
 let pathKeywordMigrationPromise: Promise<void> | null = null;
 let pathKeywordCleanupPromise: Promise<void> | null = null;
 let flatRuntimeMigrationPromise: Promise<void> | null = null;
@@ -40,8 +45,16 @@ let flatRuntimeMigrationPromise: Promise<void> | null = null;
 type ReadyManifest = {
   id: string;
   revision: string;
-  files: readonly SpeechModelFile[];
+  files: readonly { name: string; bytes: number; sha256: string }[];
 };
+
+function isLegacyReadyManifest(manifest: ReadyManifest): boolean {
+  return (
+    manifest.id === SENSE_VOICE_VAD_MODEL.id &&
+    manifest.revision === SENSE_VOICE_VAD_MODEL.revision &&
+    JSON.stringify(manifest.files) === JSON.stringify(LEGACY_READY_MANIFEST_FILES)
+  );
+}
 
 const EXPECTED_READY_MANIFEST: ReadyManifest = {
   id: SENSE_VOICE_VAD_MODEL.id,
@@ -69,8 +82,15 @@ export class SenseVoiceVadModelArtifacts implements SpeechModelArtifactsPort {
       if (JSON.stringify(manifest) !== JSON.stringify(EXPECTED_READY_MANIFEST)) return false;
       for (const file of SENSE_VOICE_VAD_MODEL.files) {
         const path = `${READY_DIR}/${getSpeechModelRuntimeRelativePath(file.name)}`;
-        if (!(await exists(path)) || (await stat(path)).size !== file.bytes) return false;
+        if (!(await this.verifyFile(path, file))) return false;
       }
+      if (
+        !(await this.verifyFile(
+          `${READY_DIR}/${getSpeechModelRuntimeRelativePath(SILERO_VAD_FILE.name)}`,
+          SILERO_VAD_FILE,
+        ))
+      )
+        return false;
       pathKeywordCleanupPromise ??= removeIfPresent(PATH_KEYWORD_LEGACY_READY_DIR);
       await pathKeywordCleanupPromise;
       return true;
@@ -99,6 +119,20 @@ export class SenseVoiceVadModelArtifacts implements SpeechModelArtifactsPort {
     await mkdir(`${STAGING_DIR}/${SPEECH_MODEL_RUNTIME_DIRS.vad}`, {
       NSURLIsExcludedFromBackupKey: true,
     });
+    const bundledVad = await Asset.fromModule(bundledSileroVadAsset).downloadAsync();
+    if (!bundledVad.localUri) throw new Error('内置 VAD 模型不可用');
+    await copyFile(
+      bundledVad.localUri,
+      `${STAGING_DIR}/${getSpeechModelRuntimeRelativePath(SILERO_VAD_FILE.name)}`,
+    );
+    if (
+      !(await this.verifyFile(
+        `${STAGING_DIR}/${getSpeechModelRuntimeRelativePath(SILERO_VAD_FILE.name)}`,
+        SILERO_VAD_FILE,
+      ))
+    ) {
+      throw new Error('内置 VAD 模型校验失败');
+    }
   }
 
   async downloadFile({
@@ -143,6 +177,11 @@ export class SenseVoiceVadModelArtifacts implements SpeechModelArtifactsPort {
 
   async verifyStagedFile(file: SpeechModelFile): Promise<boolean> {
     const path = `${STAGING_DIR}/${getSpeechModelRuntimeRelativePath(file.name)}`;
+    if (!(await exists(path))) return false;
+    return this.verifyFile(path, file);
+  }
+
+  private async verifyFile(path: string, file: { name: string; bytes: number; sha256: string }) {
     if (!(await exists(path))) return false;
     const actualSize = (await stat(path)).size;
     if (actualSize !== file.bytes) {
@@ -234,6 +273,8 @@ export class SenseVoiceVadModelArtifacts implements SpeechModelArtifactsPort {
         JSON.stringify(manifest.files) === JSON.stringify(EXPECTED_READY_MANIFEST.files);
       if (manifest.id === PATH_KEYWORD_LEGACY_MODEL_ID && hasSameArtifacts) {
         await writeFile(markerPath, JSON.stringify(EXPECTED_READY_MANIFEST), 'utf8');
+      } else if (isLegacyReadyManifest(manifest)) {
+        await writeFile(markerPath, JSON.stringify(EXPECTED_READY_MANIFEST), 'utf8');
       }
     } catch {
       // isReady() rejects malformed manifests; migration never makes them authoritative.
@@ -258,7 +299,11 @@ export class SenseVoiceVadModelArtifacts implements SpeechModelArtifactsPort {
     const markerPath = `${READY_DIR}/${READY_MARKER}`;
     if (!(await exists(markerPath))) return;
 
-    const manifest = JSON.parse(await readFile(markerPath, 'utf8')) as ReadyManifest;
+    let manifest = JSON.parse(await readFile(markerPath, 'utf8')) as ReadyManifest;
+    if (isLegacyReadyManifest(manifest)) {
+      manifest = EXPECTED_READY_MANIFEST;
+      await writeFile(markerPath, JSON.stringify(EXPECTED_READY_MANIFEST), 'utf8');
+    }
     if (JSON.stringify(manifest) !== JSON.stringify(EXPECTED_READY_MANIFEST)) return;
 
     await mkdir(`${READY_DIR}/${SPEECH_MODEL_RUNTIME_DIRS.asr}`, {
@@ -267,7 +312,7 @@ export class SenseVoiceVadModelArtifacts implements SpeechModelArtifactsPort {
     await mkdir(`${READY_DIR}/${SPEECH_MODEL_RUNTIME_DIRS.vad}`, {
       NSURLIsExcludedFromBackupKey: true,
     });
-    for (const file of SENSE_VOICE_VAD_MODEL.files) {
+    for (const file of [...SENSE_VOICE_VAD_MODEL.files, SILERO_VAD_FILE]) {
       const flatPath = `${READY_DIR}/${file.name}`;
       const runtimePath = `${READY_DIR}/${getSpeechModelRuntimeRelativePath(file.name)}`;
       if (await exists(runtimePath)) {

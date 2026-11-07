@@ -53,6 +53,8 @@
 
 账单列表、已撤销账单、关键字搜索、统计占比、趋势、模式视图和 Excel 内容都是 read model。正常账单投影由两种正式事实组成：顶部未完成项读取原始输入生命周期并按 `submitted_at` 排序；日期分组读取当前有效消费记录并按 `local_date / occurred_at / source_sequence` 排序。已撤销账单是独立投影，直接读取软删除消费记录并按 `deleted_at` 倒序，不把整条原始输入合成为撤销项。关键字搜索由 SQLite repository 对商户、备注、来源原文和标签执行参数化查询，只返回当前有效消费记录，不在 UI 复制全账本后筛选。投影不得把原始输入变成消费记录、反向成为事实，或保存额外的“合计消费记录”。独立 Today 投影与页面不再保留。
 
+月度预算沿用这条事实源边界：`monthly_budgets` 仅保存用户设置的预算上限和软删除状态，通过唯一有效行约束保证单账本只有一个生效预算。`MonthlyBudgetService` 通过预算 repository port 读取配置和当月有效支出的 SQLite 聚合快照，供首页与账单页共用；剩余金额与使用率由领域规则派生。页面原有月度消费求和迁移到此查询，不另存余额，不复制全账本到首页，不引入第二个状态容器或后台预算任务。前台、页面聚焦、跨月和账本刷新使视图重新读取；预算配置不是 AI transport DTO 或消费明细导出字段。
+
 ### 2.4 Transport / AI 适配（BYOK）
 
 #### 分层结论
@@ -88,8 +90,9 @@
 
 1. `packages/contracts` 的 `ParseRequest` / `ParseResponse` 仍是两种 transport 共用的唯一解析 DTO；本地 schema 与 `LedgerService` 状态机仍是唯一入账许可。
 2. `services/managed-ai-pilot` 是独立、可整体删除的 deployment adapter：Node.js + TypeScript、显式 SQL migration + SQLite、官方 OpenAI SDK Chat Completions JSON mode、Pino 结构化日志；不引入 ORM、账号框架、provider registry 或通用代理框架。
-3. pilot SQLite 只保存匿名主体、邀请码/凭证摘要、entitlement、请求状态、额度和 token/耗时等 usage 元数据，以及每个匿名主体最近一次三档付费意愿。它不得保存 `raw_text`、标签候选、完整请求体、金额、商户、自由反馈文本或完整模型输出。
+3. pilot SQLite 只保存匿名主体、邀请码/凭证摘要、entitlement、请求状态、额度和 token/耗时等 usage 元数据，以及匿名反馈的最新三档选择。它不得保存 `raw_text`、标签候选、完整请求体、金额、商户、自由反馈文本或完整模型输出。
 4. `/activate` 原子绑定邀请码与匿名 activation id，并签发只以摘要保存的短期 bearer token；`/parse` 只接受当前版本 `ParseRequest`；认证后的 `GET/PUT /feedback` 只读取/覆盖固定枚举且不扣解析额度；`/health` 只报告最小状态。
+   `GET/PUT /anonymous-feedback` 通过独立的 256 位随机 bearer 凭证读取/覆盖固定枚举；凭证只存摘要，按客户端地址限流，不需要 AI 激活，且不扣解析额度。
 5. 请求 reservation、幂等、撤销/过期、总量/日量、用户级/全局速率与并发检查在同一 SQLite 写事务内完成；成功上游响应通过共享 schema 后才完成用量扣减。服务重启后过期 reservation 显式标为失败，不静默重试上游。
 6. 上游 host、固定 model、timeout、token 上限和限流参数来自部署环境；客户端请求不能覆盖。entitlement 的环境变量只作为管理员颁发新邀请码时的默认值，`invites` 保存每码有效天数/总量/日量快照，激活事务从该快照创建 `entitlements`。上游 key 只在服务器 env/secret 中。
 7. 客户端若接入 pilot，必须在设置中显式选择并保存 pilot 凭证；失败时不自动回退 BYOK。真实联网 smoke 独立于本地账本默认 gate。
@@ -106,7 +109,7 @@
 
 ### 2.5 UI
 
-UI 只调用应用服务与配置用例，不直接拼 SQL 或散落调用模型。界面可先乐观展示“已记下”，但正式状态始终来自 SQLite。设置页提供 BYOK 表单（Endpoint / Key / Model / 保存 / 测试 / 掩码 / 清空）和独立的内测付费意愿入口；后者通过窄 feedback port 调用 pilot，不进入账本服务或 AI parse transport。
+UI 只调用应用服务与配置用例，不直接拼 SQL 或散落调用模型。界面可先乐观展示“已记下”，但正式状态始终来自 SQLite。设置页提供 BYOK 表单（Endpoint / Key / Model / 保存 / 测试 / 掩码 / 清空）和独立反馈入口；后者使用独立随机凭证调用反馈接口，不依赖邀请码，不进入账本服务或 AI parse transport。旧版客户端的认证接口保留以服务已发布版本；新反馈数据与旧 pilot 反馈分别统计。
 
 ### 2.6 语音识别适配（预输入）
 
@@ -128,13 +131,13 @@ UI 只调用应用服务与配置用例，不直接拼 SQL 或散落调用模型
 #### 运行合同
 
 - 模拟流式会话：sherpa 原生采集器产生 16 kHz 单声道 PCM；每个音频块串行进入同一个 Silero VAD。VAD 产出的完整语段按顺序交给同一个 SenseVoice offline recognizer，识别期间不并发处理语段，不创建录音文件。
-- App 级语音运行时在模型 ready、App active 且首屏交互完成后异步调用 `StreamingSpeechPort.prepare()`。`prepare()` 只解析 ready 路径并创建 SenseVoice 引擎，不请求权限、不创建 VAD、不打开麦克风；并发的预热与 `start()` 共享同一个 in-flight promise，保证进程内最多加载一份引擎。页面会话 cleanup 只取消当前采集，只有 App 级运行时卸载或模型删除才能 `dispose()` 引擎。
+- App 级语音运行时在模型 ready、App active 后异步调用 `StreamingSpeechPort.prepare()`，不等待交互队列。`prepare()` 校验并复用运行时模型路径、创建 SenseVoice 引擎，不请求权限、不创建 VAD、不打开麦克风；并发预热与 `start()` 共享路径校验和引擎加载。`start()` 在已校验路径上立即启动麦克风，PCM 串行等待 VAD 和引擎就绪；不得再次哈希模型或等待 VAD 初始化后才收音。页面 cleanup 只取消采集；`dispose()` 等待完整预热与会话释放并清除路径缓存，删除模型先 dispose。
 - 转写：固定模型 `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17` 的 `model.int8.onnx`；`modelType: sense_voice`、自动语言、ITN、greedy search、2 threads、CPU provider。Silero VAD 使用官方 Android 示例默认值：threshold 0.5、minimum silence 0.25 秒、minimum speech 0.25 秒、window 512、maximum speech 5 秒；用户松手时先停止采集，再等待已排队 PCM 完成、调用 VAD `flush()` 并识别尾段。
 - 已完成语段按顺序合并后只投影到瞬时 `partialText`；VAD 分段不能自动结束按住会话或把片段写进正式输入。最终合并结果只在松手后合入受控原文一次。
-- 模型清单固定 SenseVoice revision、官方 Silero VAD、三个文件、字节数、SHA-256 和两个显式来源：国内镜像与 Hugging Face 境外源；小型 VAD 文件使用 sherpa-onnx 官方 GitHub Release。下载到临时目录，逐文件校验，最后写 ready 标记；校验失败不得提供“仍然使用”选项。
+- 模型清单固定 SenseVoice revision、两个下载文件、字节数、SHA-256 和两个显式来源：ModelScope 国内源（固定镜像 commit）与 Hugging Face 境外源；小型 Silero VAD 文件固定随 App 内置，启动/准备阶段复制到运行目录并按 SHA-256 校验，不再从网络下载。SenseVoice 下载到临时目录，连同内置 VAD 一起校验，最后写 ready 标记；校验失败不得提供“仍然使用”选项。
 - 发布后的模型根目录名及其 `asr/` 完整路径不得包含 `vad` 或 `silero`，因为 `react-native-sherpa-onnx` 会按完整路径关键词探测模型类型。根目录内隔离为 `asr/`（`model.int8.onnx`、`tokens.txt`）与 `vad/`（`silero_vad.onnx`）；SDK 只扫描 `asr/`，VAD 薄桥只读取 `vad/silero_vad.onnx`。模型管理器一次性迁移已校验的旧根目录和平铺布局，不保留旧路径加载分支。
 - 不根据网络失败自动切换下载源。下载来源只改变传输 URL，不改变模型 ID、校验值、运行配置或识别合同。
-- 语音首次使用弹窗展示体积、离线隐私说明、来源选择、进度、失败和重试；模型未就绪时不得启动录音。模型删除入口不删除账本或 AI 提供商配置。
+- 语音首次使用弹窗展示 SenseVoice 下载体积、内置 VAD 说明、离线隐私说明、来源选择、进度、失败和重试；模型未就绪时不得启动录音。模型删除入口只删除本地 SenseVoice 运行目录（下次启用时重新复制内置 VAD），不删除账本或 AI 提供商配置。
 - 必须披露：语音不生成录音文件，模型下载完成后识别完全在本机进行。
 - 页面卸载 / App 进入后台：停止 PCM 采集、取消订阅并释放当前识别流；不启用后台录音。模型下载状态独立于语音会话，可从中断状态显式重试。
 - 权限拒绝、模型未就绪、模型加载失败、无语音、busy、interrupted 等映射为显式中文可恢复状态；不存在 network 转写错误。
@@ -240,6 +243,8 @@ src/infrastructure/speech/                    # 原生 import 与生产适配器
 **净熵下降**：去掉一整条部署与双轨解析路径；新增的 secure config + 设置 UI 替代原先“环境变量 + Worker + Secret”复杂度，且边界更贴合个人单机产品。
 
 ## 7. Excel 导出
+
+微信记账本 CSV 导入使用现有 `expo-file-system` 文件选择器读取本机文件；应用层整批校验，SQLite 仓储在一个同步事务中写入扁平记录与类目标签。文件 SHA-256 与行序号构成稳定导入 ID。相同文件可幂等重试；不增加远端数据源、备份协议或第二套账本。导入 CSV 不作为可执行代码或 AI 提案。
 
 导出完全在设备本地完成：SQLite 一致性快照 → 领域导出模型 → xlsx bytes → 临时文件 → 系统分享面板。
 

@@ -22,7 +22,7 @@ const logger = createMobileLogger('streaming-speech');
 type ActiveSession = {
   generation: number;
   mic: PcmLiveStreamHandle;
-  vad: VoiceActivityDetector;
+  vad: Promise<VoiceActivityDetector>;
   engineReady: Promise<SttEngine>;
   observer: StreamingSpeechObserver;
   transcripts: string[];
@@ -51,6 +51,8 @@ function joinSegments(segments: readonly string[]): string {
 export class SherpaStreamingSpeech implements StreamingSpeechPort {
   private engine: SttEngine | null = null;
   private engineLoad: Promise<SttEngine> | null = null;
+  private preparation: Promise<void> | null = null;
+  private modelPath: Promise<string> | null = null;
   private active: ActiveSession | null = null;
   private generation = 0;
 
@@ -60,9 +62,19 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
     return true;
   }
 
-  async prepare(): Promise<void> {
-    const modelPath = await this.requireModelPath();
-    await this.getOrCreateEngine(modelPath);
+  prepare(): Promise<void> {
+    if (this.preparation) return this.preparation;
+
+    const preparation = (async () => {
+      const modelPath = await this.requireModelPath();
+      await this.getOrCreateEngine(modelPath);
+    })();
+    let trackedPreparation!: Promise<void>;
+    trackedPreparation = preparation.finally(() => {
+      if (this.preparation === trackedPreparation) this.preparation = null;
+    });
+    this.preparation = trackedPreparation;
+    return trackedPreparation;
   }
 
   async getPermissions(): Promise<{ granted: boolean }> {
@@ -76,14 +88,15 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
   }
 
   async start(observer: StreamingSpeechObserver): Promise<void> {
+    const startedAt = Date.now();
     if (this.active) throw new StreamingSpeechError('busy');
     const generation = ++this.generation;
     const modelPath = await this.requireModelPath();
-    let vad: VoiceActivityDetector | null = null;
+    let vad: Promise<VoiceActivityDetector> | null = null;
     let mic: PcmLiveStreamHandle | null = null;
 
     try {
-      vad = await createVoiceActivityDetector({
+      vad = createVoiceActivityDetector({
         modelPath: `${modelPath}/${SPEECH_MODEL_RUNTIME_DIRS.vad}/silero_vad.onnx`,
         sampleRate: SAMPLE_RATE,
         threshold: 0.5,
@@ -123,7 +136,9 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
             if (sampleRate !== SAMPLE_RATE) {
               throw new Error(`Unexpected PCM sample rate: ${sampleRate}`);
             }
-            const segments = await session.vad.acceptWaveform(Array.from(samples));
+            const detector = await session.vad;
+            if (session.cancelled) return;
+            const segments = await detector.acceptWaveform(Array.from(samples));
             await this.recognizeSegments(session, segments);
           })
           .catch((error: unknown) => {
@@ -136,10 +151,14 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
       void engineReady.catch((error: unknown) => {
         this.signalFailure(session, 'model-load-failed', error);
       });
+      void vad.catch((error: unknown) => {
+        this.signalFailure(session, 'model-load-failed', error);
+      });
       this.active = session;
       await mic.start();
       logger.info('stream_started', {
         generation,
+        startup_ms: Date.now() - startedAt,
         sample_rate: SAMPLE_RATE,
         buffer_frames: BUFFER_SIZE_FRAMES,
         recognition: 'sense_voice_vad',
@@ -181,7 +200,7 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
       if (this.active === session) this.active = null;
       await session.processing;
       if (session.failure) throw session.failure;
-      await this.recognizeSegments(session, await session.vad.flush());
+      await this.recognizeSegments(session, await (await session.vad).flush());
       const result = joinSegments(session.transcripts);
       logger.info('stream_finalized', {
         generation: session.generation,
@@ -203,7 +222,7 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
       session.removeDataListener();
       session.removeErrorListener();
       if (this.active === session) this.active = null;
-      await this.ignoreError(() => session.vad.destroy());
+      await this.ignoreError(async () => (await session.vad).destroy());
     }
   }
 
@@ -217,24 +236,38 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
     session.removeErrorListener();
     await this.ignoreError(() => session.mic.stop());
     await this.ignoreError(() => session.processing);
-    await this.ignoreError(() => session.vad.destroy());
+    await this.ignoreError(async () => (await session.vad).destroy());
     logger.info('stream_cancelled', { generation: session.generation });
   }
 
   async dispose(): Promise<void> {
     await this.cancel();
+    const preparation = this.preparation;
+    if (preparation) await this.ignoreError(async () => void (await preparation));
     const loading = this.engineLoad;
     if (loading) await this.ignoreError(async () => void (await loading));
     const engine = this.engine;
     this.engine = null;
     this.engineLoad = null;
+    this.preparation = null;
+    this.modelPath = null;
     if (engine) await this.ignoreError(() => engine.destroy());
   }
 
-  private async requireModelPath(): Promise<string> {
-    const modelPath = await this.modelManager.getReadyPath();
-    if (!modelPath) throw new StreamingSpeechError('model-not-ready');
-    return modelPath;
+  private requireModelPath(): Promise<string> {
+    if (this.modelPath) return this.modelPath;
+    const loading = this.modelManager
+      .getReadyPath()
+      .then((path) => {
+        if (!path) throw new StreamingSpeechError('model-not-ready');
+        return path;
+      })
+      .catch((error: unknown) => {
+        if (this.modelPath === loading) this.modelPath = null;
+        throw error;
+      });
+    this.modelPath = loading;
+    return loading;
   }
 
   private async getOrCreateEngine(modelPath: string): Promise<SttEngine> {
@@ -316,10 +349,10 @@ export class SherpaStreamingSpeech implements StreamingSpeechPort {
 
   private async releasePartialSession(
     mic: PcmLiveStreamHandle | null,
-    vad: VoiceActivityDetector | null,
+    vad: Promise<VoiceActivityDetector> | null,
   ): Promise<void> {
     if (mic) await this.ignoreError(() => mic.stop());
-    if (vad) await this.ignoreError(() => vad.destroy());
+    if (vad) await this.ignoreError(async () => (await vad).destroy());
   }
 
   private async ignoreError(action: () => Promise<void>): Promise<void> {

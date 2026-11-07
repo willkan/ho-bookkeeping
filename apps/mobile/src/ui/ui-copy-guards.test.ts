@@ -105,7 +105,7 @@ describe('UI product-copy guards', () => {
     expect(trend).toContain('<TrendBarChart');
     expect(charts).toContain('<ScrollView');
     expect(charts).toContain('horizontal');
-    expect(charts).toContain('width: 58');
+    expect(charts).toMatch(/trendColumn: \{ width: 76/);
     expect(charts).not.toContain("flex: 1,\n    alignItems: 'center'");
   });
 
@@ -147,12 +147,13 @@ describe('UI product-copy guards', () => {
   it('settings exposes anonymous payment willingness without presenting a payment flow', () => {
     const settings = readFileSync(join(APP_ROOT, 'app/(tabs)/settings.tsx'), 'utf8');
     const support = readFileSync(join(APP_ROOT, 'src/ui/support-author-screen.tsx'), 'utf8');
-    expect(settings).toContain('支持作者 · 付费意愿');
+    expect(settings).toContain('意见反馈');
     expect(settings).toContain("router.push('/support-author')");
     expect(support).toContain('愿意为正式版付费');
     expect(support).toContain('还不确定');
     expect(support).toContain('暂不愿意');
-    expect(support).toContain('这不是付款，也不会产生扣费');
+    expect(support).toContain('不会产生扣费');
+    expect(support).not.toContain('先用邀请码激活');
     expect(support).toContain('不占用 AI 解析额度');
     expect(support).not.toMatch(/支付金额|信用卡|支付宝|微信支付|内购/);
   });
@@ -215,6 +216,7 @@ describe('UI product-copy guards', () => {
   // Positive: voice disclosure explains file-free, device-only streaming recognition
   it('voice session ships Chinese streaming disclosure', () => {
     const src = readFileSync(join(APP_ROOT, 'src/application/voice-session.ts'), 'utf8');
+    const record = readFileSync(join(APP_ROOT, 'app/(tabs)/index.tsx'), 'utf8');
     expect(src).toMatch(/语音在本机识别，不会保存录音/);
     expect(src).toMatch(/正在听，松开结束/);
     expect(src).toMatch(/按住说话/);
@@ -222,6 +224,7 @@ describe('UI product-copy guards', () => {
     expect(src).toMatch(/正在完成识别/);
     expect(src).toMatch(/没有识别到语音/);
     expect(src).toMatch(/未获得麦克风权限/);
+    expect(record).not.toContain('正在准备');
   });
 
   it('record home binds hold/release gestures and preserves a screen-reader toggle', () => {

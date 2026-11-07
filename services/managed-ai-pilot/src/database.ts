@@ -132,4 +132,18 @@ function migrate(db: PilotDatabase): void {
       );
     })();
   }
+
+  if (!db.prepare('SELECT 1 FROM schema_migrations WHERE version = 5').get()) {
+    db.transaction(() => {
+      db.exec(`CREATE TABLE anonymous_feedback (
+        credential_hash TEXT PRIMARY KEY,
+        willingness TEXT NOT NULL CHECK(willingness IN ('willing', 'unsure', 'not_willing')),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )`);
+      db.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (5, ?)').run(
+        Date.now(),
+      );
+    })();
+  }
 }

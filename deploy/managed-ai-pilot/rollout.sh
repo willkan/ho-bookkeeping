@@ -26,11 +26,12 @@ if test -f "$pilot_release_file"; then
   pilot_previous_image=$(sed -n 's/^PILOT_IMAGE=//p' "$pilot_release_file")
 fi
 pilot_timestamp=$(date -u +%Y%m%dT%H%M%SZ)
-mkdir -p backups
-pilot_backup_file="backups/pilot-pre-rollout-$pilot_timestamp.sqlite"
-# The ECS currently provides SQLite 3.26/Python 3.6. The sqlite3 CLI's online
-# backup command is supported there and remains consistent while WAL is active.
-sqlite3 data/pilot.sqlite ".timeout 10000" ".backup '$pilot_backup_file'"
+docker exec bookkeeping-managed-ai-pilot mkdir -p /app/data/backups
+pilot_backup_file="data/backups/pilot-pre-rollout-$pilot_timestamp.sqlite"
+# Use the running service's SQLite library for an online backup, including WAL.
+docker exec bookkeeping-managed-ai-pilot node -e \
+  'const Database = require("better-sqlite3"); const db = new Database("/app/data/pilot.sqlite", { readonly: true }); db.backup(process.argv[1]).then(() => db.close()).catch((error) => { console.error(error.message); process.exitCode = 1; });' \
+  "/app/$pilot_backup_file"
 
 pilot_restore() {
   if test -n "$pilot_previous_image"; then

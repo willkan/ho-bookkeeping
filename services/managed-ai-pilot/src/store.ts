@@ -422,6 +422,40 @@ export class PilotStore {
     return row ?? null;
   }
 
+  getAnonymousFeedback(credential: string): PilotFeedback | null {
+    const hash = digestSecret(credential, this.config.inviteHashPepper);
+    return (
+      (this.db
+        .prepare(
+          `SELECT willingness, created_at createdAt, updated_at updatedAt
+      FROM anonymous_feedback WHERE credential_hash = ?`,
+        )
+        .get(hash) as PilotFeedback | undefined) ?? null
+    );
+  }
+
+  saveAnonymousFeedback(credential: string, willingness: PilotWillingness): PilotFeedback {
+    const hash = digestSecret(credential, this.config.inviteHashPepper);
+    const now = this.now();
+    this.db
+      .prepare(
+        `INSERT INTO anonymous_feedback(credential_hash, willingness, created_at, updated_at)
+      VALUES (?, ?, ?, ?) ON CONFLICT(credential_hash) DO UPDATE SET
+      willingness = excluded.willingness, updated_at = excluded.updated_at`,
+      )
+      .run(hash, willingness, now, now);
+    return this.getAnonymousFeedback(credential)!;
+  }
+
+  anonymousFeedbackCounts(): Record<PilotWillingness, number> {
+    const result: Record<PilotWillingness, number> = { willing: 0, unsure: 0, not_willing: 0 };
+    const rows = this.db
+      .prepare('SELECT willingness, COUNT(*) count FROM anonymous_feedback GROUP BY willingness')
+      .all() as { willingness: PilotWillingness; count: number }[];
+    for (const row of rows) result[row.willingness] = row.count;
+    return result;
+  }
+
   upsertFeedback(subjectId: string, willingness: PilotWillingness): PilotFeedback {
     const now = this.now();
     this.db

@@ -438,13 +438,33 @@ describe('sqlite migrations and repository integration', () => {
     const version = db.get<{ version: number }>(
       'SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1',
     );
-    expect(version?.version).toBe(11);
+    expect(version?.version).toBe(12);
     const settings = new LedgerRepository(db, new SequenceIdGenerator()).getSettings();
     expect(settings.confirmMode).toBe('auto_post');
     db.close();
   });
 
   // Positive: foreign keys enabled
+  it('upgrades an existing ledger without enabling a budget and enforces one valid active budget', () => {
+    const db = openBetterSqliteDatabase(':memory:');
+    migrateThroughVersion(db, 11);
+    db.run("INSERT INTO app_settings (key, value) VALUES ('confirm_mode', 'confirm_before_post')");
+    migrate(db);
+    expect(db.all('SELECT * FROM monthly_budgets')).toEqual([]);
+    expect(new LedgerRepository(db, new SequenceIdGenerator()).getSettings().confirmMode).toBe(
+      'confirm_before_post',
+    );
+    const sql = `INSERT INTO monthly_budgets (id, amount_minor, created_at, updated_at) VALUES (?, ?, ?, ?)`;
+    for (const amount of [0, -1, 1.5, 100000000000]) {
+      expect(() => db.run(sql, ['invalid', amount, '2026-09-27', '2026-09-27'])).toThrow();
+    }
+    db.run(sql, ['one', 10000, '2026-09-27', '2026-09-27']);
+    expect(() => db.run(sql, ['two', 20000, '2026-09-27', '2026-09-27'])).toThrow();
+    migrate(db);
+    expect(db.all('SELECT * FROM monthly_budgets')).toHaveLength(1);
+    db.close();
+  });
+
   it('enforces foreign keys for parse_jobs', () => {
     const db = openBetterSqliteDatabase(':memory:');
     migrate(db);

@@ -110,6 +110,38 @@ export function createPilotHttpServer(
           throw classified;
         }
       }
+      if (
+        (request.method === 'GET' || request.method === 'PUT') &&
+        request.url === '/anonymous-feedback'
+      ) {
+        const realIp = request.headers['x-real-ip'];
+        feedbackLimiter.take(
+          typeof realIp === 'string' ? realIp : (request.socket.remoteAddress ?? 'unknown'),
+        );
+        const credential = bearerToken(request);
+        if (!/^feedback_[0-9a-f]{64}$/.test(credential))
+          throw new PilotError('unauthorized', 401, 'invalid feedback credential');
+        if (request.method === 'GET') {
+          const feedback = store.getAnonymousFeedback(credential);
+          logger.info({
+            request_id: correlationId,
+            feedback_action: 'read',
+            status: 'ok',
+            latency_ms: Date.now() - started,
+          });
+          return json(response, 200, feedbackResponse(correlationId, feedback));
+        }
+        requireJson(request);
+        const body = FeedbackSchema.parse(await readJson(request, config.maxBodyBytes));
+        const feedback = store.saveAnonymousFeedback(credential, body.willingness);
+        logger.info({
+          request_id: correlationId,
+          feedback_action: 'update',
+          status: 'ok',
+          latency_ms: Date.now() - started,
+        });
+        return json(response, 200, feedbackResponse(correlationId, feedback));
+      }
       if ((request.method === 'GET' || request.method === 'PUT') && request.url === '/feedback') {
         const { subjectId, inviteId } = store.authenticate(bearerToken(request));
         logSubject = subjectId;

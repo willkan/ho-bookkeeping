@@ -41,7 +41,7 @@ export default function RootLayout() {
           <Stack.Screen name="export" options={{ title: '导出 Excel' }} />
           <Stack.Screen name="ai-provider" options={{ title: '智能整理' }} />
           <Stack.Screen name="managed-ai-pilot" options={{ title: '托管 AI 内测' }} />
-          <Stack.Screen name="support-author" options={{ title: '支持作者' }} />
+          <Stack.Screen name="support-author" options={{ title: '意见反馈' }} />
         </Stack>
       </SpeechRuntimeProvider>
     </AppProvider>

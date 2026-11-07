@@ -63,11 +63,7 @@ describe('speech model download lifecycle', () => {
     const path = await manager.download('domestic', (next) => progress.push(next));
 
     expect(path).toBe('/models/sense-voice-vad');
-    expect(artifacts.downloaded).toEqual([
-      'domestic:model.int8.onnx',
-      'domestic:tokens.txt',
-      'domestic:silero_vad.onnx',
-    ]);
+    expect(artifacts.downloaded).toEqual(['domestic:model.int8.onnx', 'domestic:tokens.txt']);
     expect(artifacts.published).toBe(true);
     expect(progress.at(-1)).toEqual({
       bytesDownloaded: totalSpeechModelBytes(),

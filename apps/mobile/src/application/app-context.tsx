@@ -9,6 +9,8 @@ import React, {
 } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { LedgerService } from './ledger-service';
+import { MonthlyBudgetService } from './monthly-budget-service';
+import { SqliteMonthlyBudgetRepository } from '../infrastructure/db/monthly-budget-repository';
 import type { AiUsageSink } from '../domain/ai-usage';
 import { OpenAiCompatibleParseTransport } from '../infrastructure/ai/transport';
 import {
@@ -49,6 +51,7 @@ type AppContextValue = {
   managedPilotPublic: ManagedPilotPublic | null;
   backgroundScheduling: BackgroundSchedulingState;
   service: LedgerService | null;
+  monthlyBudgetService: MonthlyBudgetService | null;
   providerConfigStore: ProviderConfigStore | null;
   managedPilotStore: ManagedPilotStore | null;
   aiUsageSink: AiUsageSink | null;
@@ -67,6 +70,7 @@ const AppContext = createContext<AppContextValue>({
   managedPilotPublic: null,
   backgroundScheduling: { status: 'unknown', detail: null },
   service: null,
+  monthlyBudgetService: null,
   providerConfigStore: null,
   managedPilotStore: null,
   aiUsageSink: null,
@@ -97,6 +101,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     detail: null,
   });
   const [service, setService] = useState<LedgerService | null>(null);
+  const [monthlyBudgetService, setMonthlyBudgetService] = useState<MonthlyBudgetService | null>(
+    null,
+  );
   const [providerConfigStore, setProviderConfigStore] = useState<ProviderConfigStore | null>(null);
   const [managedPilotStore, setManagedPilotStore] = useState<ManagedPilotStore | null>(null);
   const [aiUsageSink, setAiUsageSink] = useState<AiUsageSink | null>(null);
@@ -150,6 +157,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             detail: registration.detail,
           });
           setService(ledger);
+          setMonthlyBudgetService(
+            new MonthlyBudgetService(new SqliteMonthlyBudgetRepository(db), ids),
+          );
           setProviderConfigStore(store);
           setManagedPilotStore(pilotStore);
           setAiUsageSink(() => usageSink);
@@ -217,6 +227,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       managedPilotPublic: managedPilotPublicValue,
       backgroundScheduling,
       service,
+      monthlyBudgetService,
       providerConfigStore,
       managedPilotStore,
       aiUsageSink,
@@ -233,6 +244,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       managedPilotPublicValue,
       backgroundScheduling,
       service,
+      monthlyBudgetService,
       providerConfigStore,
       managedPilotStore,
       aiUsageSink,

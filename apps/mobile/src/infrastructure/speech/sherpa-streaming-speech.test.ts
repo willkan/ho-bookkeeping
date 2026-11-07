@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SpeechModelManager } from '../../application/speech-model-manager';
 import { SherpaStreamingSpeech } from './sherpa-streaming-speech';
+import { VoiceSessionController } from '../../application/voice-session';
 
 const native = vi.hoisted(() => {
   let onData: ((samples: Float32Array, sampleRate: number) => void) | null = null;
@@ -156,6 +157,146 @@ describe('SherpaStreamingSpeech SenseVoice + VAD boundary', () => {
     await vi.waitFor(() => expect(partials).toEqual(['买菜花了300元，']));
 
     expect(native.createSTT).toHaveBeenCalledTimes(1);
+  });
+
+  it('deduplicates concurrent app-level preparation and retries after a failed load', async () => {
+    const speech = new SherpaStreamingSpeech(readyModelManager());
+    native.createSTT.mockRejectedValueOnce(new Error('cold start failed'));
+
+    const first = speech.prepare();
+    const second = speech.prepare();
+    await expect(first).rejects.toMatchObject({ code: 'model-load-failed' });
+    await expect(second).rejects.toMatchObject({ code: 'model-load-failed' });
+    expect(native.createSTT).toHaveBeenCalledTimes(1);
+
+    await speech.prepare();
+
+    expect(native.createSTT).toHaveBeenCalledTimes(2);
+  });
+
+  it('waits for an in-flight preparation before disposing the loaded engine', async () => {
+    const speech = new SherpaStreamingSpeech(readyModelManager());
+    let finishLoading!: () => void;
+    native.createSTT.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishLoading = () => resolve(native.engine);
+        }),
+    );
+
+    const preparation = speech.prepare();
+    const disposal = speech.dispose();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(native.engine.destroy).not.toHaveBeenCalled();
+    finishLoading();
+    await preparation;
+    await disposal;
+
+    expect(native.engine.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses the verified model path across warm presses and invalidates it on disposal', async () => {
+    const manager = readyModelManager();
+    const speech = new SherpaStreamingSpeech(manager);
+    await speech.prepare();
+    await speech.start({ onPartial: vi.fn(), onError: vi.fn() });
+    await speech.cancel();
+    await speech.prepare();
+    await speech.start({ onPartial: vi.fn(), onError: vi.fn() });
+    await speech.cancel();
+    expect(manager.getReadyPath).toHaveBeenCalledTimes(1);
+    await speech.dispose();
+    await speech.prepare();
+    expect(manager.getReadyPath).toHaveBeenCalledTimes(2);
+  });
+
+  it('captures the first PCM block before VAD initialization finishes and preserves it on release', async () => {
+    const speech = new SherpaStreamingSpeech(readyModelManager());
+    await speech.prepare();
+    let finishVad!: () => void;
+    native.createVoiceActivityDetector.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishVad = () => resolve(native.vad);
+        }),
+    );
+    const starting = speech.start({ onPartial: vi.fn(), onError: vi.fn() });
+    await vi.waitFor(() => expect(native.mic.start).toHaveBeenCalledTimes(1));
+    await starting;
+    native.queueVadResult([{ start: 0, samples: [1] }]);
+    native.emitData([0.1]);
+    const stopping = speech.stop();
+    expect(native.vad.acceptWaveform).not.toHaveBeenCalled();
+    finishVad();
+    expect(await stopping).toBe('买菜花了300元，');
+    expect(native.vad.acceptWaveform).toHaveBeenCalledTimes(1);
+    expect(native.vad.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps early audio through the real press/release controller while VAD is pending', async () => {
+    const speech = new SherpaStreamingSpeech(readyModelManager());
+    await speech.prepare();
+    const controller = new VoiceSessionController(speech);
+    let finishVad!: () => void;
+    native.createVoiceActivityDetector.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishVad = () => resolve(native.vad);
+        }),
+    );
+    await controller.pressMic();
+    expect(controller.getState().phase).toBe('streaming');
+    native.queueVadResult([{ start: 0, samples: [1] }]);
+    native.emitData([0.1]);
+    const releasing = controller.releaseMic();
+    finishVad();
+    await releasing;
+    expect(controller.getState()).toMatchObject({
+      phase: 'idle',
+      typedText: '买菜花了300元，',
+      error: null,
+    });
+  });
+
+  it('cancels pending VAD initialization without processing buffered audio or destroying the prewarmed engine', async () => {
+    const speech = new SherpaStreamingSpeech(readyModelManager());
+    await speech.prepare();
+    let finishVad!: () => void;
+    native.createVoiceActivityDetector.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishVad = () => resolve(native.vad);
+        }),
+    );
+    await speech.start({ onPartial: vi.fn(), onError: vi.fn() });
+    native.emitData([0.1]);
+    const cancellation = speech.cancel();
+    finishVad();
+    await cancellation;
+    expect(native.vad.acceptWaveform).not.toHaveBeenCalled();
+    expect(native.vad.destroy).toHaveBeenCalledTimes(1);
+    expect(native.engine.destroy).not.toHaveBeenCalled();
+  });
+
+  it('reports VAD initialization failure and closes capture on cancellation', async () => {
+    const speech = new SherpaStreamingSpeech(readyModelManager());
+    await speech.prepare();
+    let failVad!: (reason: Error) => void;
+    native.createVoiceActivityDetector.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          failVad = reject;
+        }),
+    );
+    const onError = vi.fn();
+    await speech.start({ onPartial: vi.fn(), onError });
+    failVad(new Error('VAD initialization failed'));
+    await vi.waitFor(() =>
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'model-load-failed' })),
+    );
+    await speech.cancel();
+    expect(native.mic.stop).toHaveBeenCalledTimes(1);
   });
 
   it('recognizes completed VAD segments serially and flushes the tail only on stop', async () => {

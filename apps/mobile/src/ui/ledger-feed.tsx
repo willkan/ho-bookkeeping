@@ -1,5 +1,5 @@
-import { FlashList } from '@shopify/flash-list';
-import React, { memo, type ReactElement } from 'react';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
+import React, { memo, useEffect, useRef, type ReactElement } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { LedgerFeedItem } from '../application/ledger-feed';
 import type { LedgerPendingItem } from '../application/ledger-service';
@@ -12,6 +12,7 @@ import { colors, spacing, typography } from './tokens';
 type Props = {
   items: LedgerFeedItem[];
   header: ReactElement;
+  scrollToTopKey?: string;
   emptyTitle?: string;
   emptyDetail?: string;
   onOpenRecord: (recordId: string) => void;
@@ -156,6 +157,7 @@ const RecordRow = memo(function RecordRow({
 export function LedgerFeed({
   items,
   header,
+  scrollToTopKey,
   emptyTitle,
   emptyDetail,
   onOpenRecord,
@@ -163,8 +165,13 @@ export function LedgerFeed({
   onOpenPending,
   onRetryPending,
 }: Props) {
+  const list = useRef<FlashListRef<LedgerFeedItem>>(null);
+  useEffect(() => {
+    if (scrollToTopKey) list.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [scrollToTopKey]);
   return (
     <FlashList
+      ref={list}
       data={items}
       keyExtractor={(item) => item.key}
       getItemType={(item) => item.type}

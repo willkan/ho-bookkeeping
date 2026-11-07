@@ -13,30 +13,18 @@ const choices: { value: PilotWillingness; title: string; detail: string }[] = [
     detail: '如果它持续帮我省时间，我愿意支持作者',
   },
   { value: 'unsure', title: '还不确定', detail: '想继续体验一段时间再决定' },
-  { value: 'not_willing', title: '暂不愿意', detail: '现在还没有付费意愿' },
+  { value: 'not_willing', title: '暂不愿意', detail: '目前不考虑' },
 ];
 
-export function SupportAuthorScreen({
-  feedback,
-  active,
-  onActivate,
-}: {
-  feedback: PilotFeedbackPort | null;
-  active: boolean;
-  onActivate: () => void;
-}) {
+export function SupportAuthorScreen({ feedback }: { feedback: PilotFeedbackPort }) {
   const insets = useSafeAreaInsets();
-  const [loading, setLoading] = useState(active);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<PilotWillingness | null>(null);
   const [saved, setSaved] = useState<PilotWillingness | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!active || !feedback) {
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     setStatus(null);
     try {
@@ -48,7 +36,7 @@ export function SupportAuthorScreen({
     } finally {
       setLoading(false);
     }
-  }, [active, feedback]);
+  }, [feedback]);
 
   useEffect(() => {
     void load();
@@ -80,54 +68,46 @@ export function SupportAuthorScreen({
   return (
     <Screen style={{ paddingTop: insets.top + spacing.sm }}>
       <ScrollView contentContainerStyle={styles.page} showsVerticalScrollIndicator={false}>
-        <Text style={typography.title}>支持作者</Text>
+        <Text style={typography.title}>意见反馈</Text>
         <Text style={styles.intro}>
-          这不是付款，也不会产生扣费。你的匿名选择会帮助我判断是否值得继续做正式付费版。
+          如果花哪持续为你节省时间，你会考虑为未来的正式版付费吗？这只是匿名调查，不会产生扣费。
         </Text>
 
-        {!active || !feedback ? (
-          <View style={styles.notice}>
-            <Text style={typography.headline}>仅限托管 AI 内测用户</Text>
-            <Text style={typography.secondary}>先用邀请码激活内测，即可提交匿名付费意愿。</Text>
-            <PrimaryButton label="去激活邀请码" onPress={onActivate} />
+        <>
+          <SectionLabel>你目前的想法</SectionLabel>
+          <View style={styles.group} accessibilityRole="radiogroup">
+            {choices.map((choice) => (
+              <Pressable
+                key={choice.value}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: selected === choice.value }}
+                onPress={() => {
+                  setSelected(choice.value);
+                  setStatus(null);
+                }}
+                style={styles.choice}
+              >
+                <View style={[styles.radio, selected === choice.value && styles.radioSelected]} />
+                <View style={styles.choiceText}>
+                  <Text style={typography.body}>{choice.title}</Text>
+                  <Text style={typography.secondary}>{choice.detail}</Text>
+                </View>
+              </Pressable>
+            ))}
           </View>
-        ) : (
-          <>
-            <SectionLabel>你目前的想法</SectionLabel>
-            <View style={styles.group} accessibilityRole="radiogroup">
-              {choices.map((choice) => (
-                <Pressable
-                  key={choice.value}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: selected === choice.value }}
-                  onPress={() => {
-                    setSelected(choice.value);
-                    setStatus(null);
-                  }}
-                  style={styles.choice}
-                >
-                  <View style={[styles.radio, selected === choice.value && styles.radioSelected]} />
-                  <View style={styles.choiceText}>
-                    <Text style={typography.body}>{choice.title}</Text>
-                    <Text style={typography.secondary}>{choice.detail}</Text>
-                  </View>
-                </Pressable>
-              ))}
-            </View>
-            <PrimaryButton
-              label={busy ? '正在提交…' : saved === selected && saved ? '已提交' : '提交匿名反馈'}
-              disabled={busy || !selected || (saved === selected && saved !== null)}
-              onPress={() => void submit()}
-              accessibilityLabel="submit-payment-willingness"
-            />
-            <Text style={styles.caption}>不占用 AI 解析额度，不会发送任何账本内容。</Text>
-          </>
-        )}
+          <PrimaryButton
+            label={busy ? '正在提交…' : saved === selected && saved ? '已提交' : '提交匿名反馈'}
+            disabled={busy || !selected || (saved === selected && saved !== null)}
+            onPress={() => void submit()}
+            accessibilityLabel="submit-payment-willingness"
+          />
+          <Text style={styles.caption}>不占用 AI 解析额度，不会发送任何账本内容。</Text>
+        </>
 
         {status ? (
           <View style={styles.status}>
             <Text style={typography.secondary}>{status}</Text>
-            {active && feedback && saved === null ? (
+            {saved === null ? (
               <Pressable accessibilityRole="button" onPress={() => void load()}>
                 <Text style={styles.retry}>重试</Text>
               </Pressable>
@@ -146,12 +126,6 @@ function message(error: unknown): string {
 const styles = StyleSheet.create({
   page: { paddingBottom: spacing.xxl },
   intro: { ...typography.secondary, marginTop: spacing.sm, marginBottom: spacing.xl },
-  notice: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
   group: { backgroundColor: colors.surface, borderRadius: radius.md, marginBottom: spacing.lg },
   choice: { flexDirection: 'row', gap: spacing.md, padding: spacing.md, alignItems: 'flex-start' },
   choiceText: { flex: 1, gap: spacing.xs },

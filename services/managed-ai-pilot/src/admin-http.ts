@@ -49,6 +49,7 @@ export function createAdminHttpHandler(config: PilotConfig, store: PilotStore, l
         sendJson(response, 200, {
           invites: store.listAdminInvites(),
           requests: store.listAdminUsageRequests(),
+          anonymousFeedback: store.anonymousFeedbackCounts(),
         });
       } else if (request.method === 'POST' && url.pathname === '/admin/api/invites') {
         action = 'issue_invite';

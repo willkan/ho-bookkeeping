@@ -4,21 +4,21 @@ This deployment is a time-bounded adapter for the invited-user pilot. It owns en
 
 ## Server layout
 
+- Production host: `root@47.237.136.82`
 - Application: `/var/bookkeeping-managed-ai-pilot`
-- Source snapshot: `/var/bookkeeping-managed-ai-pilot/source`
 - Compose: `/var/bookkeeping-managed-ai-pilot/docker-compose.yml`
 - Secret environment: `/var/bookkeeping-managed-ai-pilot/.env` (mode `0600`, never committed)
 - SQLite metadata: `/var/bookkeeping-managed-ai-pilot/data/pilot.sqlite`
 - Local listener: `127.0.0.1:18084`
 - Public edge: `/var/ho-cake/https-proxy/nginx.conf`
 - Release image pointer: `/var/bookkeeping-managed-ai-pilot/.release.env`
-- Rollout command: `/usr/local/sbin/deploy-bookkeeping-managed-ai-pilot`
+- Restricted rollout command: `/usr/local/sbin/deploy-bookkeeping-managed-ai-pilot`.
 
 ## GitHub Actions release contract
 
 `.github/workflows/managed-ai-pilot.yml` is the only production release path. Pull requests run repository gates and build the image without pushing. A push to `main` additionally pushes immutable `main-<short-sha>` and moving `main` tags to `registry.cn-hangzhou.aliyuncs.com/xiagan/bookkeeping-managed-ai-pilot`, then invokes the restricted server rollout command with the immutable tag.
 
-The server never builds from a copied source tree. It retains secrets and SQLite locally, pulls the selected image, recreates only the `managed-ai-pilot` Compose service, waits for health, runs public smoke checks, and restores the previous `.release.env` image if rollout fails. Nginx/certbot and every ho-extract container are outside this workflow.
+The workflow requires the restricted deploy command and its sudo authorization on the target host. The server never builds from a copied source tree. It retains secrets and SQLite locally, takes an online SQLite backup under `data/backups` using the running container, pulls the selected image, recreates only the `managed-ai-pilot` Compose service, waits for health, runs public smoke checks, and restores the previous `.release.env` image if rollout fails. Nginx/certbot and every ho-extract container are outside this workflow.
 
 Required GitHub Actions secret names:
 
@@ -76,6 +76,8 @@ The authenticated operator UI is available at `https://bookkeeping.holic.work/ad
 
 The UI is the primary issue/reconciliation path. The server CLI remains available for recovery; it issues one high-entropy invite with a required recipient label. Plaintext is printed once and is not stored:
 
+New clients use `GET/PUT /anonymous-feedback` with a separate randomly generated feedback credential, independently of activation. The server stores its keyed digest and the latest fixed choice, and the administrator overview shows aggregate counts separately from historical invite-linked feedback. The existing `/feedback` endpoint remains available for already released clients. The reverse proxy must overwrite `X-Real-IP` with the actual client address for feedback rate limiting, and the app port must remain bound to loopback.
+
 ```sh
 docker compose run --rm managed-ai-pilot node dist/admin.js issue-invite '<recipient-label>'
 ```
@@ -96,7 +98,7 @@ docker compose run --rm managed-ai-pilot node dist/admin.js revoke-invite '<invi
 
 ## Certificate gate
 
-Before certificate issuance, both Cloudflare and Google DoH must return `47.83.182.85` for `bookkeeping.holic.work`. Until then only the bootstrap HTTP server block may be prepared; do not install the TLS block or claim public availability.
+Before certificate issuance, both Cloudflare and Google DoH must return `47.237.136.82` for `bookkeeping.holic.work`. Until then only the bootstrap HTTP server block may be prepared; do not install the TLS block or claim public availability.
 
 After DNS is correct, issue with the existing webroot:
 

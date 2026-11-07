@@ -115,39 +115,72 @@ export function TrendBarChart({
   granularity: TrendGranularity;
   onBucketPress?: (bucket: TrendBucket) => void;
 }) {
-  const max = Math.max(1, ...buckets.map((bucket) => bucket.amountMinor));
+  const largest = buckets.reduce((value, bucket) => Math.max(value, bucket.amountMinor), 0);
+  const max = Math.max(200, Math.ceil(largest / 200) * 200);
+  const ticks = [max, Math.floor(max / 2), 0];
 
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator
-      contentContainerStyle={styles.trendContent}
-      accessibilityLabel="消费趋势，可横向滚动查看全部时间"
-    >
-      {buckets.map((bucket) => {
-        const isZero = bucket.amountMinor === 0;
-        const height = isZero ? 3 : Math.max(8, Math.round((bucket.amountMinor / max) * 112));
-        return (
-          <Pressable
-            key={bucket.key}
-            style={styles.trendColumn}
-            accessibilityRole="button"
-            accessibilityLabel={`${shortBucketLabel(bucket.label, granularity)}，¥${formatYuan(bucket.amountMinor)}，轻点查看记录`}
-            onPress={() => onBucketPress?.(bucket)}
+    <View style={styles.trendChart}>
+      <Text style={typography.caption}>金额（元）</Text>
+      <View style={styles.plotRow}>
+        <View style={styles.axis} accessible={false}>
+          {ticks.map((amount, index) => (
+            <Text
+              key={index}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              style={[styles.axisLabel, { top: 28 + index * 96 - 8 }]}
+            >
+              {formatYuan(amount)}
+            </Text>
+          ))}
+        </View>
+        <View style={styles.plot}>
+          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+            {ticks.map((_, index) => (
+              <View key={index} style={[styles.gridLine, { top: 28 + index * 96 }]} />
+            ))}
+          </View>
+          <ScrollView
+            horizontal
+            style={styles.trendScroll}
+            showsHorizontalScrollIndicator
+            contentContainerStyle={styles.trendContent}
+            accessibilityLabel="消费趋势，可横向滚动查看全部时间"
           >
-            <Text numberOfLines={1} style={styles.trendValue}>
-              {isZero ? '' : `¥${formatYuan(bucket.amountMinor)}`}
-            </Text>
-            <View style={styles.barArea}>
-              <View style={[styles.trendBar, isZero && styles.zeroBar, { height }]} />
-            </View>
-            <Text numberOfLines={1} style={styles.trendLabel}>
-              {shortBucketLabel(bucket.label, granularity)}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </ScrollView>
+            {buckets.map((bucket) => {
+              const isZero = bucket.amountMinor === 0;
+              const height = (bucket.amountMinor / max) * 192;
+              return (
+                <Pressable
+                  key={bucket.key}
+                  style={({ pressed }) => [styles.trendColumn, pressed && styles.pressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${bucket.label}，¥${formatYuan(bucket.amountMinor)}，轻点查看记录`}
+                  onPress={() => onBucketPress?.(bucket)}
+                >
+                  <View style={styles.barArea}>
+                    <Text numberOfLines={1} adjustsFontSizeToFit style={styles.trendValue}>
+                      {isZero ? '0' : formatYuan(bucket.amountMinor)}
+                    </Text>
+                    <View
+                      style={[
+                        styles.trendBar,
+                        isZero && styles.zeroBar,
+                        { height: isZero ? 2 : height },
+                      ]}
+                    />
+                  </View>
+                  <Text numberOfLines={1} style={styles.trendLabel}>
+                    {shortBucketLabel(bucket.label, granularity)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -156,44 +189,45 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginVertical: spacing.xl,
   },
-  trendContent: {
-    minWidth: '100%',
-    paddingVertical: spacing.xl,
-    paddingHorizontal: spacing.xs,
-    alignItems: 'flex-end',
+  trendChart: { marginTop: spacing.xl, gap: spacing.sm },
+  plotRow: { flexDirection: 'row', height: 264 },
+  axis: { width: 58 },
+  axisLabel: {
+    ...typography.caption,
+    position: 'absolute',
+    width: 52,
+    textAlign: 'right',
+    fontSize: 10,
+    fontVariant: ['tabular-nums'],
   },
-  trendColumn: {
-    width: 58,
-    alignItems: 'center',
+  plot: { flex: 1 },
+  gridLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.divider,
   },
+  trendScroll: { flexGrow: 0, height: 264 },
+  trendContent: { paddingHorizontal: spacing.xs },
+  trendColumn: { width: 76, alignItems: 'center' },
+  pressed: { opacity: 0.6 },
   trendValue: {
     ...typography.caption,
-    width: 58,
-    height: 18,
-    fontSize: 10,
+    width: 72,
+    paddingBottom: 6,
+    fontSize: 11,
     textAlign: 'center',
     color: colors.ink,
+    fontVariant: ['tabular-nums'],
   },
-  barArea: {
-    height: 116,
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-  },
+  barArea: { height: 220, justifyContent: 'flex-end', alignItems: 'center' },
   trendBar: {
-    width: 28,
+    width: 24,
     borderTopLeftRadius: 5,
     borderTopRightRadius: 5,
     backgroundColor: colors.accent,
   },
-  zeroBar: {
-    backgroundColor: colors.divider,
-    borderRadius: 2,
-  },
-  trendLabel: {
-    ...typography.caption,
-    width: 58,
-    marginTop: spacing.sm,
-    textAlign: 'center',
-    fontSize: 11,
-  },
+  zeroBar: { backgroundColor: colors.muted, borderRadius: 2 },
+  trendLabel: { ...typography.caption, width: 76, marginTop: spacing.md, textAlign: 'center' },
 });

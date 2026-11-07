@@ -63,6 +63,7 @@ export function adminPage(
     <div class="metric"><b id="metric-unsure">—</b><span>还不确定</span></div>
     <div class="metric"><b id="metric-not-willing">—</b><span>暂不愿意</span></div>
   </section>
+  <p>独立匿名反馈：愿意 <span id="anonymous-willing">—</span> · 不确定 <span id="anonymous-unsure">—</span> · 暂不愿意 <span id="anonymous-not-willing">—</span></p>
   <h2>邀请码汇总</h2>
   <div class="table-wrap"><table><thead><tr><th>颁发给</th><th>状态</th><th>付费意愿</th><th>反馈时间</th><th>邀请码 ID</th><th>匿名主体</th><th>成功次数</th><th>Prompt</th><th>Cache hit</th><th>Cache miss</th><th>Completion</th><th>Total</th><th>额度</th><th>创建时间</th><th>操作</th></tr></thead><tbody id="invite-rows"></tbody></table></div>
   <h2>最近请求</h2>
@@ -116,6 +117,9 @@ async function load() {
     $('metric-willing').textContent=number(data.invites.filter((item)=>item.willingness==='willing').length);
     $('metric-unsure').textContent=number(data.invites.filter((item)=>item.willingness==='unsure').length);
     $('metric-not-willing').textContent=number(data.invites.filter((item)=>item.willingness==='not_willing').length);
+    $('anonymous-willing').textContent=number(data.anonymousFeedback.willing);
+    $('anonymous-unsure').textContent=number(data.anonymousFeedback.unsure);
+    $('anonymous-not-willing').textContent=number(data.anonymousFeedback.not_willing);
   } catch (error) { $('issue-status').textContent=error.message; }
 }
 async function revoke(inviteId) {

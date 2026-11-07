@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter, type Href } from 'expo-router';
-import React, { useCallback, useDeferredValue, useMemo, useState } from 'react';
+import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -14,29 +14,23 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../src/application/app-context';
 import { buildLedgerFeed } from '../../src/application/ledger-feed';
-import { formatYuan } from '../../src/domain/money';
+import { calendarMonth } from '../../src/domain/monthly-budget';
 import type { TagMatchMode, TrendGranularity } from '../../src/domain/types';
+import { DateRangePicker } from '../../src/ui/date-range-picker';
 import { LedgerFeed } from '../../src/ui/ledger-feed';
+import { MonthlyBudgetPanel } from '../../src/ui/monthly-budget-panel';
 import { Chip, LoadingBlock, PrimaryButton, Screen } from '../../src/ui/primitives';
 import { colors, radius, spacing, typography } from '../../src/ui/tokens';
 
 type AnalysisKind = 'breakdown' | 'trend';
 type ScopeKind = 'time' | 'mode';
 
-function monthRange(): { start: string; end: string } {
-  const date = new Date();
-  const year = date.getFullYear();
-  const month = date.getMonth() + 1;
-  const start = `${year}-${`${month}`.padStart(2, '0')}-01`;
-  const lastDay = new Date(year, month, 0).getDate();
-  return { start, end: `${year}-${`${month}`.padStart(2, '0')}-${lastDay}` };
-}
-
 export default function LedgerHomeScreen() {
   const insets = useSafeAreaInsets();
   const { ready, service, refresh, tick } = useApp();
   const router = useRouter();
-  const defaults = monthRange();
+  const defaults = calendarMonth(new Date());
+  const { budgetOverview } = useLocalSearchParams<{ budgetOverview?: string }>();
   const [filterOpen, setFilterOpen] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisKind>('breakdown');
   const [scope, setScope] = useState<ScopeKind>('time');
@@ -49,6 +43,9 @@ export default function LedgerHomeScreen() {
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [searchKeyword, setSearchKeyword] = useState('');
   const deferredKeyword = useDeferredValue(searchKeyword.trim());
+  useEffect(() => {
+    if (budgetOverview) setSearchKeyword('');
+  }, [budgetOverview]);
 
   const groups = useMemo(() => {
     void tick;
@@ -76,17 +73,14 @@ export default function LedgerHomeScreen() {
     [ledger, searchActive, searchRecords],
   );
   const feed = useMemo(() => buildLedgerFeed(displayedLedger), [displayedLedger]);
-  const monthRecords = useMemo(() => {
-    return ledger.records.filter(
-      (record) => record.localDate >= defaults.start && record.localDate <= defaults.end,
-    );
-  }, [defaults.end, defaults.start, ledger.records]);
-
   const groupId = selectedGroupId ?? groups[0]?.id ?? null;
-  const monthTotal = monthRecords.reduce((sum, record) => sum + record.actualCostMinor, 0);
   const selectedMode = modes.find((mode) => mode.id === modeId);
   const filterSummary = [
-    analysis === 'breakdown' && scope === 'mode' ? (selectedMode?.name ?? '选择模式') : '本月',
+    analysis === 'breakdown' && scope === 'mode'
+      ? (selectedMode?.name ?? '选择模式')
+      : start === defaults.start && end === defaults.end
+        ? '本月'
+        : `${start} 至 ${end}`,
     selectedTagIds.length ? `${selectedTagIds.length} 个标签` : '全部标签',
   ].join(' · ');
 
@@ -97,6 +91,7 @@ export default function LedgerHomeScreen() {
   };
 
   const viewResult = () => {
+    if (scope === 'time' && start > end) return;
     const tagIds = selectedTagIds.join(',');
     if (analysis === 'trend') {
       setFilterOpen(false);
@@ -241,11 +236,7 @@ export default function LedgerHomeScreen() {
         </View>
       ) : (
         <>
-          <View style={styles.overview}>
-            <Text style={typography.secondary}>本月消费</Text>
-            <Text style={styles.total}>¥{formatYuan(monthTotal)}</Text>
-            <Text style={typography.caption}>{monthRecords.length} 条记录</Text>
-          </View>
+          <MonthlyBudgetPanel variant="ledger" />
 
           <View style={styles.analysisRow}>
             <Pressable style={styles.analysisButton} onPress={() => openFilters('breakdown')}>
@@ -270,6 +261,7 @@ export default function LedgerHomeScreen() {
   return (
     <Screen style={{ paddingTop: insets.top + spacing.sm }}>
       <LedgerFeed
+        scrollToTopKey={budgetOverview}
         items={feed}
         header={header}
         emptyTitle={searchActive ? '没有找到相关账单' : undefined}
@@ -280,7 +272,12 @@ export default function LedgerHomeScreen() {
         onRetryPending={retryPending}
       />
 
-      <Modal visible={filterOpen} animationType="slide" presentationStyle="pageSheet">
+      <Modal
+        visible={filterOpen}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setFilterOpen(false)}
+      >
         <Screen style={{ paddingTop: insets.top + spacing.sm }}>
           <View style={styles.modalHeader}>
             <Text style={typography.headline}>筛选</Text>
@@ -332,11 +329,12 @@ export default function LedgerHomeScreen() {
             {scope === 'time' ? (
               <>
                 <Text style={styles.sectionTitle}>时间</Text>
-                <View style={styles.dateRow}>
-                  <TextInput value={start} onChangeText={setStart} style={styles.input} />
-                  <Text style={typography.secondary}>至</Text>
-                  <TextInput value={end} onChangeText={setEnd} style={styles.input} />
-                </View>
+                <DateRangePicker
+                  start={start}
+                  end={end}
+                  onStartChange={setStart}
+                  onEndChange={setEnd}
+                />
               </>
             ) : (
               <>
@@ -430,7 +428,7 @@ export default function LedgerHomeScreen() {
               })}
             </View>
           </ScrollView>
-          <View style={styles.footer}>
+          <View style={[styles.footer, { bottom: Math.max(insets.bottom, spacing.lg) }]}>
             <Pressable
               onPress={() => {
                 setSelectedTagIds([]);
@@ -443,7 +441,10 @@ export default function LedgerHomeScreen() {
             <View style={{ flex: 1 }}>
               <PrimaryButton
                 label="查看结果"
-                disabled={analysis === 'breakdown' && (!groupId || (scope === 'mode' && !modeId))}
+                disabled={
+                  (scope === 'time' && start > end) ||
+                  (analysis === 'breakdown' && (!groupId || (scope === 'mode' && !modeId)))
+                }
                 onPress={viewResult}
               />
             </View>
@@ -504,8 +505,6 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, color: colors.ink, fontSize: 16, paddingVertical: spacing.sm },
   searchSummary: { paddingVertical: spacing.lg, gap: spacing.xs },
-  overview: { paddingVertical: spacing.xl },
-  total: { fontSize: 34, fontWeight: '700', color: colors.accent, marginVertical: spacing.xs },
   analysisRow: { flexDirection: 'row', gap: spacing.sm },
   analysisButton: {
     flex: 1,
@@ -547,16 +546,6 @@ const styles = StyleSheet.create({
   segmentItemSelected: { backgroundColor: colors.accent, borderColor: colors.accent },
   segmentText: { ...typography.secondary, color: colors.ink },
   segmentTextSelected: { color: colors.white, fontWeight: '600' },
-  dateRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  input: {
-    flex: 1,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.divider,
-    backgroundColor: colors.surface,
-    borderRadius: radius.sm,
-    padding: spacing.md,
-    color: colors.ink,
-  },
   choiceRow: {
     minHeight: 48,
     flexDirection: 'row',

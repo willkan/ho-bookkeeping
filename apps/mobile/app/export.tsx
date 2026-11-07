@@ -9,17 +9,79 @@ import {
 import { writeExportFile } from '../src/infrastructure/export/write-export-file';
 import { Chip, PrimaryButton, Screen, SectionLabel, SecondaryButton } from '../src/ui/primitives';
 import { colors, spacing, typography } from '../src/ui/tokens';
+import { parseWeChatCsv } from '../src/application/wechat-csv';
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
 export default function ExportScreen() {
-  const { service } = useApp();
+  const { service, refresh } = useApp();
   const [busy, setBusy] = useState(false);
   const [start, setStart] = useState('2020-01-01');
   const [end, setEnd] = useState(today());
   const [selected, setSelected] = useState<ExportFieldId[]>(allExportFieldIds());
+  const [importFile, setImportFile] = useState<{
+    text: string;
+    hash: string;
+    count: number;
+    totalMinor: number;
+  } | null>(null);
+
+  const pickWeChatCsv = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const { File } = await import('expo-file-system');
+      const picked = await File.pickFileAsync({ mimeTypes: ['*/*'] });
+      if (picked.canceled || !picked.result) return;
+      const csv = await picked.result.text();
+      const rows = parseWeChatCsv(csv);
+      const Crypto = await import('expo-crypto');
+      const hash = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, csv);
+      setImportFile({
+        text: csv,
+        hash,
+        count: rows.length,
+        totalMinor: rows.reduce((sum, row) => sum + row.amountMinor, 0),
+      });
+    } catch (e) {
+      setImportFile(null);
+      Alert.alert('无法读取明细', e instanceof Error ? e.message : '文件读取失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const importWeChatCsv = () => {
+    if (!service || !importFile || busy) return;
+    Alert.alert(
+      '导入微信记账本明细？',
+      `${importFile.count} 笔支出，合计 ¥${(importFile.totalMinor / 100).toFixed(2)}。将直接写入本机账本。`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '确认导入',
+          onPress: () => {
+            setBusy(true);
+            try {
+              const inserted = service.importWeChatCsv(importFile.text, importFile.hash);
+              setImportFile(null);
+              void refresh();
+              Alert.alert(
+                '导入完成',
+                inserted === 0 ? '此文件已导入过，账本未重复增加。' : `已入账 ${inserted} 笔。`,
+              );
+            } catch (e) {
+              Alert.alert('导入失败', e instanceof Error ? e.message : '账本未改动');
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   const toggle = (id: ExportFieldId) => {
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -112,6 +174,24 @@ export default function ExportScreen() {
       <Text style={[typography.caption, { marginTop: spacing.lg }]}>
         导出内容不包含 AI 密钥等敏感信息。
       </Text>
+
+      <SectionLabel>微信记账本明细</SectionLabel>
+      <SecondaryButton
+        label={busy ? '正在读取…' : '选择已分类 CSV'}
+        onPress={() => void pickWeChatCsv()}
+      />
+      {importFile && (
+        <View style={{ marginTop: spacing.md, gap: spacing.sm }}>
+          <Text style={typography.body}>
+            已检查 {importFile.count} 笔支出，合计 ¥{(importFile.totalMinor / 100).toFixed(2)}
+          </Text>
+          <PrimaryButton
+            label="导入本机账本"
+            onPress={importWeChatCsv}
+            disabled={busy || !service}
+          />
+        </View>
+      )}
     </Screen>
   );
 }

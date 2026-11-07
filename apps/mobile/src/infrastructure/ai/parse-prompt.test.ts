@@ -33,6 +33,15 @@ function extractExampleJsonOutput(prompt: string): unknown {
 }
 
 describe('PARSE_SYSTEM_PROMPT for Chat Completions JSON mode', () => {
+  it('prioritizes an ambiguous purchase number as money while preserving explicit dates and zero', () => {
+    expect(PARSE_SYSTEM_PROMPT).toMatch(/prioritize extracting spending amounts over dates/i);
+    expect(PARSE_SYSTEM_PROMPT).toContain('7.4购物');
+    expect(PARSE_SYSTEM_PROMPT).toContain('740 fen');
+    expect(PARSE_SYSTEM_PROMPT).toContain('7月4日');
+    expect(PARSE_SYSTEM_PROMPT).toContain('7.4当天');
+    expect(PARSE_SYSTEM_PROMPT).toMatch(/never invent a zero amount/i);
+    expect(PARSE_SYSTEM_PROMPT).toMatch(/explicit zero amounts are valid/i);
+  });
   it('anchors relative dates to submitted_at and timezone instead of provider execution time', () => {
     expect(PARSE_SYSTEM_PROMPT).toMatch(/relative date/i);
     expect(PARSE_SYSTEM_PROMPT).toMatch(/昨天/);
