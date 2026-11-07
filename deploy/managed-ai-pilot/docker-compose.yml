@@ -30,3 +30,8 @@ services:
       options:
         tag: bookkeeping-managed-ai-pilot
         labels: service,environment
+
+networks:
+  default:
+    external: true
+    name: bookkeeping-managed-ai-pilot_default

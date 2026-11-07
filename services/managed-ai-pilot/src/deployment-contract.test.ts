@@ -27,6 +27,9 @@ describe('managed pilot GitHub Actions deployment contract', () => {
     expect(rollout).toContain('--no-deps --force-recreate managed-ai-pilot');
     expect(rollout).toContain('docker exec bookkeeping-managed-ai-pilot node');
     expect(rollout).toContain('db.backup(process.argv[1])');
+    expect(workflow).toContain('PILOT_REGISTRY_PASSWORD');
+    expect(rollout).toContain('--password-stdin');
+    expect(compose).toContain('external: true');
     expect(rollout).toContain('pilot_restore');
     expect(rollout).not.toMatch(/docker compose down|--remove-orphans|docker image prune/);
   });

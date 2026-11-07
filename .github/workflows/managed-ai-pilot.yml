@@ -87,8 +87,10 @@ jobs:
         env:
           ECS_HOST: ${{ secrets.ECS_HOST }}
           PILOT_IMAGE: ${{ needs.image.outputs.immutable_ref }}
+          PILOT_REGISTRY_USER: ${{ secrets.ALIYUN_DOCKER_USERNAME }}
+          PILOT_REGISTRY_PASSWORD: ${{ secrets.ALIYUN_DOCKER_PASSWORD }}
         run: |
-          ssh deploy@"$ECS_HOST" sudo /usr/local/sbin/deploy-bookkeeping-managed-ai-pilot "$PILOT_IMAGE"
+          printf '%s\n%s\n' "$PILOT_REGISTRY_USER" "$PILOT_REGISTRY_PASSWORD" | ssh deploy@"$ECS_HOST" sudo /usr/local/sbin/deploy-bookkeeping-managed-ai-pilot "$PILOT_IMAGE"
       - name: Deployment summary
         run: |
           echo '## Managed AI pilot deployed' >> "$GITHUB_STEP_SUMMARY"

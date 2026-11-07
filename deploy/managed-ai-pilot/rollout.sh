@@ -13,6 +13,20 @@ if [[ ! "$pilot_image" =~ ^registry\.cn-hangzhou\.aliyuncs\.com/xiagan/bookkeepi
   exit 2
 fi
 
+IFS= read -r pilot_registry_user
+IFS= read -r pilot_registry_password
+test -n "$pilot_registry_user" && test -n "$pilot_registry_password"
+pilot_docker_config=$(mktemp -d)
+chmod 700 "$pilot_docker_config"
+export DOCKER_CONFIG="$pilot_docker_config"
+pilot_remove_registry_credentials() {
+  rm -f "$pilot_docker_config/config.json"
+  rmdir "$pilot_docker_config"
+}
+trap pilot_remove_registry_credentials EXIT
+printf '%s' "$pilot_registry_password" | docker login registry.cn-hangzhou.aliyuncs.com --username "$pilot_registry_user" --password-stdin >/dev/null
+unset pilot_registry_user pilot_registry_password
+
 exec 9>"$pilot_lock_file"
 flock -n 9 || { printf 'another pilot rollout is active\n' >&2; exit 3; }
 
@@ -33,8 +47,9 @@ docker exec bookkeeping-managed-ai-pilot node -e \
   'const Database = require("better-sqlite3"); const db = new Database("/app/data/pilot.sqlite", { readonly: true }); db.backup(process.argv[1]).then(() => db.close()).catch((error) => { console.error(error.message); process.exitCode = 1; });' \
   "/app/$pilot_backup_file"
 
+pilot_changed=0
 pilot_restore() {
-  if test -n "$pilot_previous_image"; then
+  if test "$pilot_changed" -eq 1 && test -n "$pilot_previous_image"; then
     printf 'PILOT_IMAGE=%s\n' "$pilot_previous_image" > "$pilot_release_file"
     chmod 600 "$pilot_release_file"
     docker compose --env-file "$pilot_release_file" -f "$pilot_compose_file" up -d \
@@ -46,6 +61,7 @@ trap pilot_restore ERR
 docker pull "$pilot_image"
 printf 'PILOT_IMAGE=%s\n' "$pilot_image" > "$pilot_release_file"
 chmod 600 "$pilot_release_file"
+pilot_changed=1
 docker compose --env-file "$pilot_release_file" -f "$pilot_compose_file" up -d \
   --no-deps --force-recreate managed-ai-pilot
 
